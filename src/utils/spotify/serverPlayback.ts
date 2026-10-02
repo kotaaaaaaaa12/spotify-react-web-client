@@ -11,6 +11,9 @@ export interface ServerReport {
   pcmBytes?: number;
   audioBytes?: number;
   errorCode?: string | null;
+  diagnostics?: { revision: string; nativeExit?: { code: number | null; signal: string | null };
+    encoderExit?: { code: number | null; signal: string | null };
+    events: { event: string; errorKind?: string; httpStatus?: number; osErrorCode?: string; reason?: string }[] };
 }
 export const isServerPlaybackEnabled = () => localStorage.getItem(SERVER_MODE) === '1';
 export const hasPairedPlaybackSession = () => !!localStorage.getItem(PAIR_MODE);

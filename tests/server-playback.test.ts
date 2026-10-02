@@ -62,7 +62,7 @@ describe('Authenticated server playback', () => {
     expect(internal.url).toBe('http://container/start');
     expect(await internal.json()).toEqual({ accessToken: 'private-access', name: `Spotify Cloud Player ${pair.id.slice(0, 8)}` });
     expect(internal.headers.has('Cookie')).toBe(false); expect(internal.headers.has('Authorization')).toBe(false);
-    const body = await result.json(); expect(body.authentication).toBe('accepted'); expect(body.version).toBe(1);
+    const body = await result.json(); expect(body.authentication).toBe('accepted'); expect(body.version).toBe(2);
     expect(JSON.stringify(body)).not.toContain('private-'); expect(result.headers.get('Cache-Control')).toBe('no-store');
     const other = await connection(); await request('/api/server/start', other.cookie, 'POST');
     expect(containers.size).toBe(2);
@@ -102,6 +102,15 @@ describe('Authenticated server playback', () => {
     const result = await request('/api/server/start', pair.cookie, 'POST');
     expect(result.status).toBe(503); expect(await result.text()).not.toContain('private storage');
     expect(env.SERVER_PLAYERS.get).not.toHaveBeenCalled();
+  });
+  it('forwards only recognized native evidence through the private report route', async () => {
+    const pair = await connection(); await request('/api/server/start', pair.cookie, 'POST');
+    containers.get(`spotify-player-v1:${pair.id}`).fetch.mockImplementation(async () => Response.json({ ...report,
+      diagnostics: { revision: 'native-diagnostics-2', nativeExit: { code: 1, signal: null, token: 'private-token' },
+        events: [{ event: 'connect_initialization_failed', errorKind: 'Unavailable', reason: 'invalid_credentials', stderr: 'private-token' }] } }));
+    const result = await (await request('/api/server/status', pair.cookie)).json();
+    expect(result.version).toBe(2); expect(result.diagnostics.events[0]).toEqual({ event: 'connect_initialization_failed', errorKind: 'Unavailable', reason: 'invalid_credentials' });
+    expect(JSON.stringify(result)).not.toContain('private-token');
   });
   it('stops only the owned session, and stops its runtime before removing credentials on logout', async () => {
     const pair = await connection();

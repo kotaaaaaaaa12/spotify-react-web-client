@@ -13,15 +13,15 @@ afterEach(async () => { for (const player of players.splice(0)) await player.dis
 function child() {
   const process = new EventEmitter() as any;
   Object.assign(process, { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(), exitCode: null });
-  process.kill = vi.fn(() => { if (process.exitCode === null) { process.exitCode = 0; process.emit('exit', 0); } });
+  process.kill = vi.fn(() => { if (process.exitCode === null) { process.exitCode = 0; process.emit('exit', 0); process.emit('close', 0, null); } });
   return process;
 }
 async function fixture() {
   const encoder = child(), native = child();
   const cacheDir = await mkdtemp(join(tmpdir(), 'spotify-player-test-'));
   const spawnProcess = vi.fn((name: string) => name === 'ffmpeg' ? encoder : native);
-  const player = new ServerPlayer({ spawnProcess, cacheDir }); players.push(player);
-  return { player, encoder, native, cacheDir, spawnProcess };
+  const logger = vi.fn(); const player = new ServerPlayer({ spawnProcess, cacheDir, logger }); players.push(player);
+  return { player, encoder, native, cacheDir, spawnProcess, logger };
 }
 const config = { accessToken: 'private-access-token', name: 'Spotify Cloud Player 1234abcd' };
 describe('Container audio process', () => {
@@ -65,6 +65,44 @@ describe('Container audio process', () => {
     expect(player.attach(first)).toBe(true); expect(player.attach(slow)).toBe(true); expect(player.attach(client())).toBe(false);
     encoder.stdout.write(Buffer.from([255, 251])); expect(slow.destroy).toHaveBeenCalled(); expect(player.clients.size).toBe(1);
     first.emit('close'); expect(player.clients.size).toBe(0);
+  });
+  it('waits for final stderr after exit and preserves the native cause ahead of encoder shutdown', async () => {
+    const { player, native, encoder, logger } = await fixture(); await player.start(config);
+    native.stderr.write('Authenticated as private-user\n'); native.emit('exit', 1, null);
+    encoder.emit('close', 0, null);
+    expect(player.status().phase).toBe('waiting_for_playback');
+    native.stderr.write('ERROR librespot: could not initialize spirc: Permission denied { HTTP 403, access token private-access-token }');
+    native.emit('close', 1, null);
+    expect(player.status()).toMatchObject({ phase: 'failed', authentication: 'accepted', errorCode: 'spotify_access_token_failed',
+      diagnostics: { revision: 'native-diagnostics-2', nativeExit: { code: 1, signal: null }, encoderExit: { code: 0, signal: null },
+        events: [{ event: 'access_token_failed', errorKind: 'PermissionDenied', httpStatus: 403 }] } });
+    expect(JSON.stringify(logger.mock.calls)).not.toMatch(/private-user|private-access-token/);
+    expect(logger).toHaveBeenCalled();
+  });
+  it('reports signal termination without guessing why the process was killed', async () => {
+    const { player, native } = await fixture(); await player.start(config);
+    native.stderr.write('Authenticated as private-user\n'); native.emit('exit', null, 'SIGKILL'); native.emit('close', null, 'SIGKILL');
+    expect(player.status()).toMatchObject({ errorCode: 'native_player_exited', diagnostics: { nativeExit: { code: null, signal: 'SIGKILL' } } });
+  });
+  it('captures complete error lines from large stderr chunks and bounds the event history', async () => {
+    const { player, native } = await fixture(); await player.start(config);
+    native.stderr.write('Authenticated as private-user\n');
+    native.stderr.write('ERROR could not initialize spirc: No valid authentication credentials { INVALID_CREDENTIALS }\n' + 'private-data'.repeat(2000) + '\n');
+    native.emit('exit', 1, null); native.emit('close', 1, null);
+    expect(player.status()).toMatchObject({ errorCode: 'native_connect_initialization_failed', diagnostics: { events: [
+      { event: 'connect_initialization_failed', errorKind: 'Unauthenticated', reason: 'invalid_credentials' },
+    ] } });
+    expect(JSON.stringify(player.status())).not.toContain('private-data');
+  });
+  it('captures native failure from a real subprocess with stderr lacking a final newline', async () => {
+    const cacheDir = await mkdtemp(join(tmpdir(), 'spotify-player-test-')); const logger = vi.fn();
+    const player = new ServerPlayer({ cacheDir, logger, spawnProcess: (name: string, args: string[], options: any) =>
+      name === 'librespot' ? spawn(process.execPath, ['-e', "process.stderr.write('Authenticated as private-user\\nERROR could not initialize spirc: Service unavailable { INVALID_CREDENTIALS }');process.exitCode=1;"], options) : spawn(name, args, options) });
+    players.push(player); await player.start(config);
+    await new Promise<void>(resolve => player.native.once('close', () => resolve()));
+    expect(player.status()).toMatchObject({ phase: 'failed', errorCode: 'native_connect_initialization_failed',
+      diagnostics: { nativeExit: { code: 1, signal: null }, events: [{ event: 'connect_initialization_failed', errorKind: 'Unavailable', reason: 'invalid_credentials' }] } });
+    expect(JSON.stringify(logger.mock.calls)).not.toContain('private-user');
   });
   it('stops an inactive native session after ten minutes', async () => {
     vi.useFakeTimers(); const { player, native } = await fixture(); await player.start(config);

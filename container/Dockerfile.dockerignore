@@ -4,3 +4,4 @@
 !container/Dockerfile.dockerignore
 !container/player.mjs
 !container/server.mjs
+!container/diagnostics.mjs

@@ -15,6 +15,12 @@ const descriptions: Record<string, string> = {
   encoder_unavailable: 'The Container does not have a working audio encoder.',
   encoder_input_closed: 'The audio encoder stopped receiving input.',
   native_player_exited: 'The Spotify server player exited before completing playback.',
+  native_connect_initialization_failed: 'Spotify Connect initialization failed after native login. Copy the server report for the error details.',
+  spotify_client_token_failed: 'Spotify Connect initialization failed while requesting a client token. Copy the server report.',
+  spotify_access_token_failed: 'Spotify Connect initialization failed while requesting an internal access token. Copy the server report.',
+  native_player_panicked: 'The native Spotify player panicked. Copy the server report.',
+  native_connect_reconnect_failed: 'The native Spotify connection exhausted its reconnect attempts. Copy the server report.',
+  native_player_shutdown: 'The native audio player shut down unexpectedly. Copy the server report.',
   encoder_exited: 'The audio encoder exited.',
 };
 

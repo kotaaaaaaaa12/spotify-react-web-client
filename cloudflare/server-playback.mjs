@@ -1,4 +1,5 @@
 import { getPairedSession } from './pairing.mjs';
+import { safeDiagnostics } from '../container/diagnostics.mjs';
 
 const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' };
 const json = (data, status = 200) => Response.json(data, { status, headers });
@@ -44,7 +45,8 @@ export async function handleServerPlayback(request, env) {
     const report = await response.json();
     // Return a fixed set of diagnostic fields, never a token or raw process log.
     return json({ phase: report.phase, deviceName: name, authentication: report.authentication, audio: report.audio,
-      pcmBytes: report.pcmBytes, audioBytes: report.audioBytes, errorCode: report.errorCode, version: 1 });
+      pcmBytes: report.pcmBytes, audioBytes: report.audioBytes, errorCode: report.errorCode,
+      diagnostics: safeDiagnostics(report.diagnostics), version: 2 });
   } catch {
     return json({ error: 'The server player is unavailable. It may still be provisioning. Retry in a moment.', phase: 'failed' }, 503);
   }
