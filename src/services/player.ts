@@ -1,4 +1,5 @@
 import axios from '../axios';
+import { activateBrowserAudio } from '../utils/spotify/browserAudio';
 import type { Pagination } from '../interfaces/api';
 import { Device } from '../interfaces/devices';
 import type { PlayHistoryObject } from '../interfaces/player';
@@ -19,6 +20,7 @@ export const setPlaybackDevice = (deviceId: string | null) => {
   playbackDeviceId = deviceId;
   try {
     if (deviceId) localStorage.setItem(DEVICE_STORAGE_KEY, deviceId);
+    else localStorage.removeItem(DEVICE_STORAGE_KEY);
   } catch {
     /* ignore storage errors */
   }
@@ -94,6 +96,7 @@ const getAvailableDevices = async () => {
 const startPlayback = async (
   body: { context_uri?: string; uris?: string[]; offset?: { position: number } } = {}
 ) => {
+  await activateBrowserAudio();
   try {
     await axios.put('/me/player/play', body, { params: deviceParams() });
   } catch (e: any) {

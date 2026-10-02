@@ -1,0 +1,123 @@
+{
+  "repository": "https://github.com/francoborrelli/spotify-react-web-client",
+  "upstream_commit": "c48ed78d30697e8ab5c1aa327ed84859f966e761",
+  "format": "Extract into the repository root and overwrite matching files.",
+  "files": [
+    {
+      "path": ".dev.vars.example",
+      "sha256": "e6e8df8fa49dcc6108cc4611439eb41e20c4b3351ff43620643a06152289f6e4"
+    },
+    {
+      "path": ".env.dist",
+      "sha256": "fdca839abf7e6a2db4271b2ad454c00a37a0155414ffc8e634633d06eca4dc12"
+    },
+    {
+      "path": ".gitignore",
+      "sha256": "6a9ef9181cbfde42d989c3b770ea5e2f9dbb1f3d98c3477e009ecd5cfd4a8e53"
+    },
+    {
+      "path": ".npmrc",
+      "sha256": "a093bb2fed59d699b7f9a62a5203cc196054c624e9c39c6d908c9e7db5dd2464"
+    },
+    {
+      "path": ".nvmrc",
+      "sha256": "68ca3fba3b7e864770cb61aeb306d4bd4354b68ab4dd38450860c5d823e42a53"
+    },
+    {
+      "path": "CLOUDFLARE_SETUP.md",
+      "sha256": "56b7cc9de24681c84ca7f7fddd6e4766df013e3fe9079d93976c4c54a4183913"
+    },
+    {
+      "path": "cloudflare/worker.mjs",
+      "sha256": "6af73cfc85d2f8c923af05679d36e136e3f07cc7bb63096d4d2acabc0438ca9e"
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "8b1708ea030018b31b9f2b6f469e4a8a4efc488120cf2ffa82ca09b08424f8b4"
+    },
+    {
+      "path": "package.json",
+      "sha256": "9891c39b582bd2dccd34948dcaae202a46ef2f4bd4425b24565062cc445371c2"
+    },
+    {
+      "path": "src/App.tsx",
+      "sha256": "ac20e1bbd806b87d176d6632d78aa53a23e2ba2844ec19bb780c66f9b7718f98"
+    },
+    {
+      "path": "src/axios.ts",
+      "sha256": "c85ae3c0355dccd29690bd6a0418226663d7061f6f4601a62884c417ace90ebf"
+    },
+    {
+      "path": "src/components/Layout/components/Navbar/Header.tsx",
+      "sha256": "f0c87b61a0976101018f05ed8bf0b07c2ba5d439e8cc67fb845e9e55dee795a2"
+    },
+    {
+      "path": "src/components/Lists/GridCards.tsx",
+      "sha256": "0fefdb9f1f10ad72c441229e75bf0db9dddb30e00ce9a7d8edf4ec7c3be8d2c3"
+    },
+    {
+      "path": "src/index.tsx",
+      "sha256": "e7cda0e67861c3bfd60c5b2f0a62af4adaaa5cbb26ea34c277ee6e19fd2a680d"
+    },
+    {
+      "path": "src/pages/FollowedArtists/index.tsx",
+      "sha256": "c10b9fce52b395985c3b44ced06c5bee582338da4a8d5772d1daeeaef9901a4e"
+    },
+    {
+      "path": "src/runtimeConfig.ts",
+      "sha256": "fbf9140448f0793b9595b1d3bc4c542807da15c2e72a60395ec0cb9b50bda203"
+    },
+    {
+      "path": "src/services/libraryPagination.ts",
+      "sha256": "3642e62c7312dc05773cdbe4c2c538f11de36b9e983648e9142ca2b4e1b4e112"
+    },
+    {
+      "path": "src/services/player.ts",
+      "sha256": "6c3d6853fdfba305d6687ec0efbabccf2ce8d7563fca32cc9b8d4a884f2f5d56"
+    },
+    {
+      "path": "src/services/users.ts",
+      "sha256": "47419e60199002f30c9609a6cfb9d7f802fea3f2577b781228fb12d0b7422583"
+    },
+    {
+      "path": "src/store/slices/auth.ts",
+      "sha256": "aa94166baa7bcdb570250d2e8eb7c982f315bd66ad71be9537368ecc07b2e46a"
+    },
+    {
+      "path": "src/store/slices/yourLibrary.ts",
+      "sha256": "609b2878da8190182f2ea67c0d0fc3d7ba3d53e0fd9815661c7084d315ac674d"
+    },
+    {
+      "path": "src/utils/localstorage.ts",
+      "sha256": "a4cf005d007541e535281a92d3db65108549deef14bc81eaac7ae83402e9c869"
+    },
+    {
+      "path": "src/utils/spotify/browserAudio.ts",
+      "sha256": "2fb3c0fc1fdc802d2d481b4fda32c842e66942d48b8f437aacbefa8c1308bb02"
+    },
+    {
+      "path": "src/utils/spotify/login.ts",
+      "sha256": "3428c0754f1d574c998f25263ce3d1f4db4b45e03932c04f1f097906d01f27d3"
+    },
+    {
+      "path": "src/utils/spotify/webPlayback.tsx",
+      "sha256": "973c73ecde499d6c5a20bd81f3cd3dda67415afaac2d42828df3ad3d9a7e0cd2"
+    },
+    {
+      "path": "tests/overlay.test.ts",
+      "sha256": "c479eff8b96e993e91da96fb73fa4a5640d54bf01b6f49a896a8e148d20fcf56"
+    },
+    {
+      "path": "vitest.config.ts",
+      "sha256": "1ba6d2b5cb75229fd46a6b773c71d06ae1e9e55bb479def43674174b1c6c1456"
+    },
+    {
+      "path": "wrangler.jsonc",
+      "sha256": "2cafdafd3ad6b64289e9dd0fdd302ade839044a408be334b7c690021a7ae2c8f"
+    },
+    {
+      "path": "yarn.lock",
+      "sha256": "435e9844a7a583559af1fb3cb90b0e9bf3723929b916e92bc64aaa69f0263610"
+    }
+  ]
+}

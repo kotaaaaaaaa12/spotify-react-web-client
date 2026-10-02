@@ -1,6 +1,7 @@
 import { createAsyncThunk, createSelector, createSlice, PayloadAction } from '@reduxjs/toolkit';
 
 // Services
+import { collectLibraryPages } from '../../services/libraryPagination';
 import { userService } from '../../services/users';
 import { albumsService } from '../../services/albums';
 import { playlistService } from '../../services/playlists';
@@ -15,6 +16,8 @@ import { LIKED_SONGS_IMAGE } from '../../constants/spotify';
 export interface YourLibraryState {
   myAlbums: Album[];
   myArtists: Artist[];
+  artistsStatus: 'idle' | 'loading' | 'loaded' | 'error';
+  artistsError?: string;
   myPlaylists: Playlist[];
 
   search: string;
@@ -29,23 +32,32 @@ const initialState: YourLibraryState = {
   view: 'LIST',
   filter: 'ALL',
   myArtists: [],
+  artistsStatus: 'idle',
   myPlaylists: [],
   orderBy: 'default',
 };
 
 export const fetchMyPlaylists = createAsyncThunk('yourLibrary/fetchMyPlaylists', async () => {
-  const response = await playlistService.getMyPlaylists({ limit: 50 });
-  return response.data.items;
+  return collectLibraryPages(async (params) => {
+    const response = await playlistService.getMyPlaylists(params);
+    return response.data;
+  }, 'offset');
 });
 
-export const fetchMyAlbums = createAsyncThunk('yourLibrary/fetchTopTracks', async () => {
-  const response = await albumsService.fetchSavedAlbums({ limit: 50 });
-  return response.data.items.map((item) => item.album);
+export const fetchMyAlbums = createAsyncThunk('yourLibrary/fetchMyAlbums', async () => {
+  return collectLibraryPages(async (params) => {
+    const response = await albumsService.fetchSavedAlbums(params);
+    return { items: response.data.items.map((item) => item.album), next: response.data.next };
+  }, 'offset');
 });
 
 export const fetchMyArtists = createAsyncThunk('yourLibrary/fetchMyArtists', async () => {
-  const response = await userService.fetchFollowedArtists({ limit: 50 });
-  return response.data.artists.items;
+  return collectLibraryPages(async (params) => {
+    const response = await userService.fetchFollowedArtists(params);
+    return response.data.artists;
+  }, 'after');
+}, {
+  condition: (_, { getState }) => (getState() as RootState).yourLibrary.artistsStatus !== 'loading',
 });
 
 const yourLibrarySlice = createSlice({
@@ -72,8 +84,17 @@ const yourLibrarySlice = createSlice({
     builder.addCase(fetchMyAlbums.fulfilled, (state, action) => {
       state.myAlbums = action.payload;
     });
+    builder.addCase(fetchMyArtists.pending, (state) => {
+      state.artistsStatus = 'loading';
+      state.artistsError = undefined;
+    });
+    builder.addCase(fetchMyArtists.rejected, (state, action) => {
+      state.artistsStatus = 'error';
+      state.artistsError = action.error.message || 'Unable to load artists.';
+    });
     builder.addCase(fetchMyArtists.fulfilled, (state, action) => {
       state.myArtists = action.payload;
+      state.artistsStatus = 'loaded';
     });
   },
 });

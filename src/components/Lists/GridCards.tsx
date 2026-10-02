@@ -18,7 +18,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../store/store';
 
 // Constants
-import { PLAYLIST_DEFAULT_IMAGE } from '../../constants/spotify';
+import { ARTISTS_DEFAULT_IMAGE, PLAYLIST_DEFAULT_IMAGE } from '../../constants/spotify';
 import { uiActions } from '../../store/slices/ui';
 import { useCallback } from 'react';
 
@@ -98,7 +98,7 @@ export const ArtistCard = ({
           title={title}
           uri={item.uri}
           description={description}
-          image={item.images[0]?.url}
+          image={item.images[0]?.url || ARTISTS_DEFAULT_IMAGE}
           context={{ context_uri: item.uri }}
           onClick={() => navigate(`/artist/${item.id}`)}
         />

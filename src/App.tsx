@@ -3,12 +3,12 @@ import './styles/App.scss';
 
 // Utils
 import i18next from 'i18next';
-import { FC, Suspense, lazy, memo, useCallback, useEffect, useMemo, useRef } from 'react';
+import { FC, Suspense, lazy, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getFromLocalStorageWithExpiry } from './utils/localstorage';
 import { getRefreshToken } from './utils/spotify/login';
 
 // Components
-import { ConfigProvider } from 'antd';
+import { Alert, Button, ConfigProvider } from 'antd';
 import { AppLayout } from './components/Layout';
 import { Route, BrowserRouter as Router, Routes, useLocation } from 'react-router-dom';
 
@@ -16,7 +16,7 @@ import { Route, BrowserRouter as Router, Routes, useLocation } from 'react-route
 import { Provider } from 'react-redux';
 import { uiActions } from './store/slices/ui';
 import { PersistGate } from 'redux-persist/integration/react';
-import { authActions, loginToSpotify } from './store/slices/auth';
+import { authActions, initializeSpotifySession } from './store/slices/auth';
 import { persistor, store, useAppDispatch, useAppSelector } from './store/store';
 
 // Spotify
@@ -27,6 +27,7 @@ import SearchContainer from './pages/Search/Container';
 import { playerService } from './services/player';
 import { Spinner } from './components/spinner/spinner';
 
+const FollowedArtists = lazy(() => import('./pages/FollowedArtists'));
 const Home = lazy(() => import('./pages/Home'));
 const Page404 = lazy(() => import('./pages/404'));
 const AlbumView = lazy(() => import('./pages/Album'));
@@ -58,20 +59,15 @@ window.addEventListener('resize', () => {
 
 const SpotifyContainer: FC<{ children: any }> = memo(({ children }) => {
   const dispatch = useAppDispatch();
+  const [playerError, setPlayerError] = useState<string>();
+  const authError = useAppSelector((state) => state.auth.error);
 
   const user = useAppSelector((state) => !!state.auth.user);
   const token = useAppSelector((state) => state.auth.token);
   const requesting = useAppSelector((state) => state.auth.requesting);
 
   useEffect(() => {
-    const tokenInLocalStorage = getFromLocalStorageWithExpiry('access_token');
-    dispatch(authActions.setToken({ token: tokenInLocalStorage }));
-
-    if (tokenInLocalStorage) {
-      dispatch(authActions.fetchUser());
-    } else {
-      dispatch(loginToSpotify());
-    }
+    dispatch(initializeSpotifySession());
   }, [dispatch]);
 
   const webPlaybackSdkProps: WebPlaybackProps = useMemo(
@@ -98,7 +94,7 @@ const SpotifyContainer: FC<{ children: any }> = memo(({ children }) => {
         // ("premium required") and failed transfers emit errors on each attempt — calling
         // loginToSpotify() here caused an endless re-login loop. Just surface it; token
         // refresh is handled by the axios 401 interceptor + onPlayerRequestAccessToken.
-        console.warn('Spotify player error:', e);
+        setPlayerError(e);
       },
       onPlayerDeviceSelected: () => {
         dispatch(authActions.setPlayerLoaded({ playerLoaded: true }));
@@ -107,9 +103,15 @@ const SpotifyContainer: FC<{ children: any }> = memo(({ children }) => {
     [dispatch, token]
   );
 
-  if (!user) return <Spinner loading={requesting}>{children}</Spinner>;
-
-  return <WebPlayback {...webPlaybackSdkProps}>{children}</WebPlayback>;
+  const error = authError || playerError;
+  const content = <>
+    {error ? <Alert type="error" message="Spotify connection" description={error} showIcon
+      action={<Button onClick={() => { setPlayerError(undefined); dispatch(authActions.clearError()); dispatch(authActions.loginToSpotify()); }}>Reconnect</Button>}
+      style={{ position: 'fixed', top: 8, left: 8, right: 8, zIndex: 10000 }} /> : null}
+    {children}
+  </>;
+  if (!user) return <Spinner loading={requesting}>{content}</Spinner>;
+  return <WebPlayback {...webPlaybackSdkProps}>{content}</WebPlayback>;
 });
 
 const RoutesComponent = memo(() => {
@@ -127,6 +129,7 @@ const RoutesComponent = memo(() => {
     () =>
       [
         { path: '', element: <Home container={container} />, public: true },
+        { path: '/collection/artists', element: <FollowedArtists /> },
         { path: '/collection/tracks', element: <LikedSongsPage container={container} /> },
         {
           public: true,

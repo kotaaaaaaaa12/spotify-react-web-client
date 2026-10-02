@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 
-import { Popconfirm, Space } from 'antd';
+import { Button, Modal, Popconfirm, Space } from 'antd';
 import { Link } from 'react-router-dom';
 import { CloseIcon } from '../../../Icons';
 import { WhiteButton } from '../../../Button';
@@ -15,6 +15,7 @@ import { useAppDispatch, useAppSelector } from '../../../../store/store';
 
 // Constants
 import { ARTISTS_DEFAULT_IMAGE } from '../../../../constants/spotify';
+import { clearSpotifySession } from '../../../../utils/spotify/login';
 import useIsMobile from '../../../../utils/isMobile';
 
 const LoginButton = () => {
@@ -76,6 +77,11 @@ const Header = ({ opacity }: { opacity: number; title?: string }) => {
             <News />
           </div> */}
 
+          {user ? <Link to="/collection/artists" title="Followed artists" style={{ whiteSpace: 'nowrap', color: '#fff' }}>{isMobile ? 'Artists' : 'Followed artists'}</Link> : null}
+          {user ? <Button type="text" style={{ color: 'white' }} onClick={() => Modal.confirm({
+            title: 'Sign out of this browser?', content: 'Your Spotify library will stay in your account.',
+            okText: 'Sign out', cancelText: 'Cancel', onOk: () => { clearSpotifySession(); location.assign('/'); },
+          })}>Sign out</Button> : null}
           {user ? (
             <div className='avatar-container'>
               <Link to={`/users/${user!.id}`}>

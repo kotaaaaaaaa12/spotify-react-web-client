@@ -1,188 +1,113 @@
-import Axios from 'axios';
+import { getRuntimeConfig } from '../../runtimeConfig';
 import { getFromLocalStorageWithExpiry, setLocalStorageWithExpiry } from '../localstorage';
-import axios from 'axios';
-
-/* eslint-disable import/no-anonymous-default-export */
-const client_id = import.meta.env.VITE_SPOTIFY_CLIENT_ID;
-const redirect_uri = import.meta.env.VITE_SPOTIFY_REDIRECT_URL;
-
-const authUrl = new URL('https://accounts.spotify.com/authorize');
 
 const SCOPES = [
-  'ugc-image-upload',
+  'ugc-image-upload', 'streaming', 'user-read-email', 'user-read-private',
+  'user-read-playback-state', 'user-modify-playback-state', 'user-read-currently-playing',
+  'playlist-read-private', 'playlist-modify-public', 'playlist-modify-private',
+  'playlist-read-collaborative', 'user-follow-modify', 'user-follow-read',
+  'user-read-playback-position', 'user-top-read', 'user-read-recently-played',
+  'user-library-read', 'user-library-modify',
+];
 
-  // Web Playback SDK: `streaming` only yields a playable device when the account-info
-  // scopes are also granted. Without these two the SDK registers a device that Spotify
-  // rejects as "Device not found" on playback. They are required, not optional.
-  'streaming',
-  'user-read-email',
-  'user-read-private',
+interface TokenResponse {
+  access_token: string;
+  expires_in: number;
+  refresh_token?: string;
+}
 
-  'user-read-playback-state',
-  'user-modify-playback-state',
-  'user-read-currently-playing',
+const PENDING_LOGIN = 'spotify_pkce_login';
+let refreshPromise: Promise<string | null> | undefined;
+let callbackPromise: Promise<[string | null, boolean]> | undefined;
 
-  'playlist-read-private',
-  'playlist-modify-public',
-  'playlist-modify-private',
-  'playlist-read-collaborative',
+const base64url = (bytes: Uint8Array) =>
+  btoa(String.fromCharCode(...bytes)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
 
-  'user-follow-modify',
-  'user-follow-read',
+export function clearSpotifySession() {
+  localStorage.removeItem('access_token');
+  localStorage.removeItem('refresh_token');
+  localStorage.removeItem('playback_device_id');
+  localStorage.removeItem('code_verifier');
+  sessionStorage.removeItem(PENDING_LOGIN);
+}
 
-  'user-read-playback-position',
-  'user-top-read',
-  'user-read-recently-played',
-
-  'user-library-read',
-  'user-library-modify',
-] as const;
-
-const sha256 = async (plain: string) => {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(plain);
-  return window.crypto.subtle.digest('SHA-256', data);
-};
-
-const base64encode = (input: ArrayBuffer) => {
-  // @ts-ignore
-  return btoa(String.fromCharCode(...new Uint8Array(input)))
-    .replace(/=/g, '')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_');
-};
-
-const generateRandomString = (length: number) => {
-  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  const values = crypto.getRandomValues(new Uint8Array(length));
-  return values.reduce((acc, x) => acc + possible[x % possible.length], '');
-};
-
-const logInWithSpotify = async () => {
-  // Always mint a fresh verifier so the challenge sent to /authorize and the
-  // verifier sent to /api/token are guaranteed to be the same pair.
-  const codeVerifier = generateRandomString(64);
-  localStorage.setItem('code_verifier', codeVerifier);
-
-  const hashed = await sha256(codeVerifier);
-  const codeChallenge = base64encode(hashed);
-
-  authUrl.search = new URLSearchParams({
-    client_id,
-    redirect_uri,
-    response_type: 'code',
-    scope: SCOPES.join(' '),
-    code_challenge_method: 'S256',
-    code_challenge: codeChallenge,
-  }).toString();
-
-  window.location.href = authUrl.toString();
-};
-
-// An authorization code is single-use. React StrictMode mounts effects twice in
-// dev, which would exchange the same code twice (the second fails with
-// "Invalid authorization code"). Share one in-flight exchange per code.
-const inFlightExchanges: Record<string, Promise<string> | undefined> = {};
-
-const requestToken = async (code: string) => {
-  const existing = inFlightExchanges[code];
-  if (existing) return existing;
-
-  const exchange = (async () => {
-    const code_verifier = localStorage.getItem('code_verifier') as string;
-
-    const body = {
-      code,
-      client_id,
-      redirect_uri,
-      code_verifier,
-      grant_type: 'authorization_code',
-    };
-
-    const { data: response } = await Axios.post<{
-      access_token: string;
-      token_type: string;
-      expires_in: number;
-      refresh_token: string;
-    }>('https://accounts.spotify.com/api/token', body, {
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-    });
-
-    if (response.access_token) {
-      setLocalStorageWithExpiry(
-        'access_token',
-        response.access_token,
-        response.expires_in * 60 * 60
-      );
-      axios.defaults.headers.common['Authorization'] = 'Bearer ' + response.access_token;
-      localStorage.setItem('refresh_token', response.refresh_token);
-      // Verifier is spent once the code is exchanged; clear it so a future login
-      // generates a fresh challenge/verifier pair.
-      localStorage.removeItem('code_verifier');
-    }
-
-    return response.access_token;
-  })();
-
-  inFlightExchanges[code] = exchange;
-  return exchange;
-};
-
-const getToken = async () => {
-  const token = getFromLocalStorageWithExpiry('access_token');
-  if (token) return [token, true];
-
-  const urlParams = new URLSearchParams(window.location.search);
-
-  let code = urlParams.get('code') as string;
-  if (code) {
-    // Strip ?code from the URL immediately so a reload can't re-exchange a
-    // spent authorization code.
-    window.history.replaceState({}, document.title, window.location.pathname);
-    return [await requestToken(code), true];
-  }
-
-  return [null, false];
-};
-
-export const getRefreshToken = async () => {
-  // refresh token that has been previously stored
-  const refreshToken = localStorage.getItem('refresh_token') as string;
-
-  if (!refreshToken) {
-    logInWithSpotify();
-    return null;
-  }
-
-  const url = 'https://accounts.spotify.com/api/token';
-
-  const payload = {
+async function tokenRequest(body: URLSearchParams): Promise<string> {
+  const response = await fetch('https://accounts.spotify.com/api/token', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: new URLSearchParams({
-      client_id,
-      grant_type: 'refresh_token',
-      refresh_token: refreshToken,
-    }),
-  };
-  const body = await fetch(url, payload);
-  const response = await body.json();
-
-  if (!response.access_token) {
-    logInWithSpotify();
-    return null;
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body,
+  });
+  const data = await response.json();
+  if (!response.ok || !data.access_token) {
+    if (response.status === 400 || response.status === 401) clearSpotifySession();
+    throw new Error(data.error_description || 'Spotify authorization failed. Please sign in again.');
   }
+  const token = data as TokenResponse;
+  // Spotify reports seconds; the local storage helper expects milliseconds.
+  setLocalStorageWithExpiry('access_token', token.access_token, Math.max(1, token.expires_in - 60) * 1000);
+  if (token.refresh_token) localStorage.setItem('refresh_token', token.refresh_token);
+  return token.access_token;
+}
 
-  setLocalStorageWithExpiry('access_token', response.access_token, response.expires_in * 60 * 60);
-  axios.defaults.headers.common['Authorization'] = 'Bearer ' + response.access_token;
-  if (response.refreshToken) {
-    localStorage.setItem('refresh_token', response.refreshToken);
+const logInWithSpotify = async (): Promise<void> => {
+  const { clientId, redirectUri } = getRuntimeConfig();
+  const verifier = base64url(crypto.getRandomValues(new Uint8Array(48)));
+  const state = base64url(crypto.getRandomValues(new Uint8Array(24)));
+  const challenge = base64url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))));
+  sessionStorage.setItem(PENDING_LOGIN, JSON.stringify({ verifier, state, redirectUri, createdAt: Date.now() }));
+  const url = new URL('https://accounts.spotify.com/authorize');
+  url.search = new URLSearchParams({
+    client_id: clientId, redirect_uri: redirectUri, response_type: 'code',
+    scope: SCOPES.join(' '), state, code_challenge_method: 'S256', code_challenge: challenge,
+  }).toString();
+  location.assign(url.href);
+};
+
+export const getRefreshToken = async (): Promise<string | null> => {
+  if (refreshPromise) return refreshPromise;
+  const refreshToken = localStorage.getItem('refresh_token');
+  if (!refreshToken) return null;
+  refreshPromise = tokenRequest(new URLSearchParams({
+    client_id: getRuntimeConfig().clientId,
+    grant_type: 'refresh_token', refresh_token: refreshToken,
+  }));
+  try { return await refreshPromise; }
+  finally { refreshPromise = undefined; }
+};
+
+const getToken = async (): Promise<[string | null, boolean]> => {
+  if (callbackPromise) return callbackPromise;
+  const params = new URLSearchParams(location.search);
+  const code = params.get('code');
+  const error = params.get('error');
+  const callbackState = params.get('state');
+  // Handle the callback before a previously saved session.
+  if (code || error) {
+    const pending = sessionStorage.getItem(PENDING_LOGIN);
+    sessionStorage.removeItem(PENDING_LOGIN);
+    for (const key of ['code', 'state', 'error', 'error_description']) params.delete(key);
+    history.replaceState({}, document.title, `${location.pathname}${params.size ? `?${params}` : ''}${location.hash}`);
+    callbackPromise = (async () => {
+      const transaction = pending ? JSON.parse(pending) : null;
+      const config = getRuntimeConfig();
+      if (!transaction || !callbackState || callbackState !== transaction.state ||
+          transaction.redirectUri !== config.redirectUri || !transaction.verifier ||
+          !Number.isFinite(transaction.createdAt) || Date.now() - transaction.createdAt > 10 * 60 * 1000) {
+        throw new Error('Spotify sign-in expired or could not be verified. Please sign in again.');
+      }
+      if (error) throw new Error('Spotify sign-in was cancelled. You can try again.');
+      const token = await tokenRequest(new URLSearchParams({
+        client_id: config.clientId, redirect_uri: config.redirectUri,
+        code: code!, code_verifier: transaction.verifier, grant_type: 'authorization_code',
+      }));
+      return [token, true] as [string, boolean];
+    })();
+    return callbackPromise;
   }
-  return response.access_token;
+  const token = getFromLocalStorageWithExpiry('access_token') as string | null;
+  if (token) return [token, true];
+  const refreshed = await getRefreshToken();
+  return [refreshed, !!refreshed];
 };
 
 export default { logInWithSpotify, getToken, getRefreshToken };

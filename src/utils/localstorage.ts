@@ -21,7 +21,10 @@ export const getFromLocalStorageWithExpiry = (key: string) => {
   if (!itemStr) {
     return null;
   }
-  const item = JSON.parse(itemStr);
+  let item;
+  try { item = JSON.parse(itemStr); }
+  catch { localStorage.removeItem(key); return null; }
+  if (!Number.isFinite(item?.expiry)) { localStorage.removeItem(key); return null; }
   const now = new Date();
   // compare the expiry time of the item with the current time
   if (now.getTime() > item.expiry) {

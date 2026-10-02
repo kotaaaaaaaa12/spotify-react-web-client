@@ -44,7 +44,7 @@ const fetchTopArtists = async (params: FetchTopItemsParams) => {
 /**
  * @description Get the current user's followed artists.
  */
-const fetchFollowedArtists = async (params: PaginationQueryParams = {}) => {
+const fetchFollowedArtists = async (params: PaginationQueryParams & { after?: string } = {}) => {
   return await axios.get<{ artists: Pagination<Artist> }>(`/me/following`, {
     params: { ...params, type: 'artist' },
   });

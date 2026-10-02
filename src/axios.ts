@@ -58,7 +58,11 @@ const cacheKeyFor = (config: any) =>
   `${config.url}?${JSON.stringify(config.params || {})}`;
 
 axios.interceptors.request.use(async (config) => {
+  const token = getFromLocalStorageWithExpiry('access_token') || await getRefreshToken();
+  if (!token) throw new Error('Sign in with Spotify to browse your music.');
+  config.headers.Authorization = `Bearer ${token}`;
   await acquireSlot();
+  (config as any).__hasSlot = true;
 
   if (isCacheableGet(config)) {
     const key = cacheKeyFor(config);
@@ -85,7 +89,7 @@ axios.interceptors.request.use(async (config) => {
 
 axios.interceptors.response.use(
   (response) => {
-    releaseSlot();
+    if ((response.config as any).__hasSlot) { releaseSlot(); (response.config as any).__hasSlot = false; }
 
     const key = (response.config as any).__cacheKey;
     if (key && response.status === 200) {
@@ -95,7 +99,7 @@ axios.interceptors.response.use(
   },
   async (error) => {
     // Release this attempt's slot first so a retry (and other queued requests) can proceed.
-    releaseSlot();
+    if (error?.config?.__hasSlot) { releaseSlot(); error.config.__hasSlot = false; }
 
     const response = error?.response;
     const config = error?.config;
@@ -103,18 +107,12 @@ axios.interceptors.response.use(
     // Network error / no response — nothing to recover from.
     if (!response || !config) return Promise.reject(error);
 
-    if (response.status === 401) {
-      return getRefreshToken()
-        .then((token) => {
-          if (!token) return Promise.reject(error);
-          axios.defaults.headers.common['Authorization'] = 'Bearer ' + token;
-          config.headers['Authorization'] = 'Bearer ' + token;
-          return axios(config);
-        })
-        .catch(() => {
-          localStorage.removeItem('refresh_token');
-          localStorage.removeItem('access_token');
-        });
+    if (response.status === 401 && !config.__authRetried) {
+      config.__authRetried = true;
+      const token = await getRefreshToken();
+      if (!token) return Promise.reject(error);
+      config.headers.Authorization = `Bearer ${token}`;
+      return axios(config);
     }
 
     // 429 Too Many Requests: Spotify's tightened (Feb 2026) rate limits are easy to trip when
