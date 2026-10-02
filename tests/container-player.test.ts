@@ -23,13 +23,13 @@ async function fixture() {
   const logger = vi.fn(); const player = new ServerPlayer({ spawnProcess, cacheDir, logger }); players.push(player);
   return { player, encoder, native, cacheDir, spawnProcess, logger };
 }
-const config = { accessToken: 'private-access-token', name: 'Spotify Cloud Player 1234abcd' };
+const config = { expectedUsername: 'private-user', name: 'Spotify Cloud Player 1234abcd' };
 describe('Container audio process', () => {
-  it('passes the token through environment, pipes PCM into the encoder, and broadcasts encoded bytes', async () => {
+  it('uses native device authorization, pipes PCM into the encoder, and broadcasts encoded bytes', async () => {
     const { player, native, encoder, spawnProcess } = await fixture();
     await player.start(config);
     const [, args, options] = spawnProcess.mock.calls.find(call => call[0] === 'librespot')! as any;
-    expect(args.join(' ')).not.toContain(config.accessToken); expect(options.env.LIBRESPOT_ACCESS_TOKEN).toBe(config.accessToken);
+    expect(args).toContain('--enable-device-auth'); expect(options.env).not.toHaveProperty('LIBRESPOT_ACCESS_TOKEN');
     expect(args).toContain('--disable-discovery'); expect(args).not.toContain('--device');
     native.stderr.write('Authenticated as private-user\n'); expect(player.status().authentication).toBe('accepted');
     const client = new EventEmitter() as any; client.writableLength = 0; client.write = vi.fn(); client.destroy = vi.fn();
@@ -43,9 +43,33 @@ describe('Container audio process', () => {
     await player.stop(); expect(client.destroy).toHaveBeenCalled(); expect(player.status().phase).toBe('stopped');
     await expect(access(player.cacheDir)).rejects.toThrow();
   });
+  it('keeps pairing announcements private and gates audio until the expected account authenticates', async () => {
+    const { player, native, encoder, logger } = await fixture(); await player.start(config);
+    const pcm: Buffer[] = []; encoder.stdin.on('data', (chunk: Buffer) => pcm.push(chunk));
+    native.stderr.write('Browse to: https://spotify.com/pair?code=AB');
+    native.stderr.write('C123\nIf prompted, enter code: ABC123\n');
+    expect(player.status()).toMatchObject({ playerRevision: 'native-device-auth-1', authenticationMode: 'device', phase: 'waiting_for_pairing', pairing: { code: 'ABC123', url: 'https://spotify.com/pair?code=ABC123' } });
+    native.stdout.write(Buffer.from([1, 2])); expect(pcm).toHaveLength(0); expect(player.status().pcmBytes).toBe(0);
+    native.stderr.write("Authenticated as 'different-user' !\n");
+    encoder.stdout.write(Buffer.from([1, 2]));
+    expect(player.status()).toMatchObject({ errorCode: 'native_account_mismatch', authentication: 'rejected', phase: 'failed', pcmBytes: 0, audioBytes: 0 });
+    expect(player.status().pairing).toBeUndefined(); expect(JSON.stringify(logger.mock.calls)).not.toMatch(/ABC123|different-user/);
+  });
+  it('clears the pairing code after approval and removes inherited token credentials', async () => {
+    vi.stubEnv('LIBRESPOT_ACCESS_TOKEN', 'inherited-secret');
+    try {
+      const { player, native, spawnProcess } = await fixture(); await player.start(config);
+      const nativeOptions = spawnProcess.mock.calls.find(call => call[0] === 'librespot')![2] as any;
+      expect(nativeOptions.env).not.toHaveProperty('LIBRESPOT_ACCESS_TOKEN');
+      native.stderr.write('Browse to: https://spotify.com/pair\nIf prompted, enter code: ABC123\n');
+      expect(player.status().pairing.code).toBe('ABC123');
+      native.stderr.write("Authenticated as 'private-user' !\n");
+      expect(player.status().pairing).toBeUndefined(); expect(player.status().authentication).toBe('accepted');
+    } finally { vi.unstubAllEnvs(); }
+  });
   it('distinguishes audio-key rejection from login failure without exposing raw stderr', async () => {
     const { player, native } = await fixture(); await player.start(config);
-    native.stderr.write('Authenticated as secret-email\nError audio key for private-track\n');
+    native.stderr.write('Authenticated as private-user\nError audio key for private-track\n');
     expect(player.status()).toMatchObject({ authentication: 'accepted', phase: 'failed', audio: 'failed', errorCode: 'spotify_audio_key_rejected' });
     expect(JSON.stringify(player.status())).not.toMatch(/secret-email|private-track/);
     await player.start(config);
@@ -59,7 +83,7 @@ describe('Container audio process', () => {
     expect(player.status()).toMatchObject({ phase: 'stopped', pcmBytes: 0, audioBytes: 0 });
   });
   it('bounds clients and disconnects slow receivers rather than retaining audio buffers', async () => {
-    const { player, encoder } = await fixture(); await player.start(config);
+    const { player, native, encoder } = await fixture(); await player.start(config); native.stderr.write('Authenticated as private-user\n');
     const client = () => Object.assign(new EventEmitter(), { writableLength: 0, write: vi.fn(), destroy: vi.fn() });
     const first = client(), slow = client(); slow.writableLength = 300000;
     expect(player.attach(first)).toBe(true); expect(player.attach(slow)).toBe(true); expect(player.attach(client())).toBe(false);
@@ -124,7 +148,7 @@ describe('Container audio process', () => {
 });
 describe('Container HTTP boundary', () => {
   it('validates start requests and serves audio as a streaming response', async () => {
-    const { player, encoder } = await fixture(); const server = createPlayerServer(player);
+    const { player, native, encoder } = await fixture(); const server = createPlayerServer(player);
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     const url = `http://127.0.0.1:${(server.address() as any).port}`;
     try {
@@ -132,6 +156,7 @@ describe('Container HTTP boundary', () => {
       expect((await fetch(`${url}/stream`)).status).toBe(409);
       expect((await fetch(`${url}/start`, { method: 'POST', body: 'broken' })).status).toBe(400);
       expect((await fetch(`${url}/start`, { method: 'POST', body: JSON.stringify(config) })).status).toBe(200);
+      native.stderr.write('Authenticated as private-user\n');
       const abort = new AbortController(); const response = await fetch(`${url}/stream`, { signal: abort.signal });
       expect(response.headers.get('Content-Type')).toBe('audio/mpeg'); expect(response.headers.get('Cache-Control')).toBe('no-store');
       const reader = response.body!.getReader(); encoder.stdout.write(Buffer.from([255, 251, 1, 2]));

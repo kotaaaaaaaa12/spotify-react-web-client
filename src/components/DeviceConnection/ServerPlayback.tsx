@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Modal, Space } from 'antd';
+import { Modal, QRCode, Space } from 'antd';
 import { ConnectionBrand, ConnectionTheme } from './ConnectionTheme';
 import { hasPairedPlaybackSession, SERVER_DIALOG_EVENT, ServerReport, serverPlaybackState, serverRequest } from '../../utils/spotify/serverPlayback';
 import { setServerAudio } from '../../utils/spotify/browserAudio';
@@ -21,6 +21,7 @@ const descriptions: Record<string, string> = {
   native_player_panicked: 'The native Spotify player panicked. Copy the server report.',
   native_connect_reconnect_failed: 'The native Spotify connection exhausted its reconnect attempts. Copy the server report.',
   native_player_shutdown: 'The native audio player shut down unexpectedly. Copy the server report.',
+  native_account_mismatch: 'The server was paired with a different Spotify account. Stop the player, restart it, and approve the new QR with the account linked to this site.',
   encoder_exited: 'The audio encoder exited.',
 };
 
@@ -60,6 +61,7 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
           return;
         }
         if (result.authentication === 'accepted') {
+          setStreamUrl(current => current || `/api/server/stream?t=${Date.now()}`);
           const devices = await playerService.getAvailableDevices(); if (cancelled) return;
           const device = devices.devices.find(item => item.name === result.deviceName);
           if (device?.id) {
@@ -88,7 +90,7 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
       const result = await serverRequest('start'); if (!alive.current) return;
       playerService.setPlaybackDevice(null); playerService.setPlaybackDeviceName(result.deviceName || null);
       setDeviceId(undefined); setReport(result); setRunning(true);
-      setStreamUrl(`/api/server/stream?t=${Date.now()}`);
+      setStreamUrl(result.authentication === 'accepted' ? `/api/server/stream?t=${Date.now()}` : undefined);
     } catch (e) { if (alive.current) setError(e instanceof Error ? e.message : 'Unable to start the server player.'); }
     finally { operation.current = false; if (alive.current) setBusy(false); }
   }, []);
@@ -130,6 +132,13 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
         {!paired ? <p className="connection-error">Server playback needs a QR session. Sign out and choose Log in with QR.</p> : null}
         {!enabled ? <button className="connection-button connection-button-wide" disabled={!paired} onClick={() => { setError(undefined); onModeChange(true); }}>Use server playback</button> : <>
           <p className="connection-status" role="status">{report?.phase === 'streaming' ? 'Server is sending audio' : deviceId ? 'Ready. Choose a track and enable audio.' : running ? 'Connecting the server player...' : 'Server playback selected'}</p>
+          {report?.pairing ? <div style={{ marginBottom: 20 }}>
+            <p className="connection-description">Authorize server playback</p>
+            <p className="connection-note">Scan this QR with your phone and approve it using the same Spotify account linked to this site. This authorization is separate from library access.</p>
+            <QRCode value={report.pairing.url} size={180} color="#000" bgColor="#fff" style={{ margin: '16px auto', padding: 12 }} />
+            <p className="connection-status" style={{ textAlign: 'center' }}>Pairing code: {report.pairing.code}</p>
+            <a className="connection-button connection-button-secondary" href={report.pairing.url} target="_blank" rel="noopener noreferrer">Open Spotify pairing</a>
+          </div> : null}
           <Space wrap style={{ marginBottom: 16 }}>
             <button className="connection-button" aria-busy={busy} disabled={busy || !paired || running} onClick={() => void start()}>Start server player</button>
             <button className="connection-button connection-button-secondary" disabled={!streamUrl || busy} onClick={enableAudio}>Enable audio</button>

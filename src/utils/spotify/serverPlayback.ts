@@ -11,6 +11,9 @@ export interface ServerReport {
   pcmBytes?: number;
   audioBytes?: number;
   errorCode?: string | null;
+  playerRevision?: string;
+  authenticationMode?: 'device';
+  pairing?: { url: string; code: string };
   diagnostics?: { revision: string; nativeExit?: { code: number | null; signal: string | null };
     encoderExit?: { code: number | null; signal: string | null };
     events: { event: string; errorKind?: string; httpStatus?: number; osErrorCode?: string; reason?: string }[] };

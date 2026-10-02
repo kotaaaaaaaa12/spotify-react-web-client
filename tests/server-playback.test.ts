@@ -41,7 +41,7 @@ beforeEach(() => {
     if (!containers.has(id)) containers.set(id, { fetch: vi.fn(async () => Response.json(report)), stopPlayer: vi.fn(async () => {}) });
     return containers.get(id);
   }) } };
-  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ access_token: 'private-access', refresh_token: 'private-refresh', expires_in: 3600 })));
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url === 'https://api.spotify.com/v1/me' ? Response.json({ id: 'linked-user' }) : Response.json({ access_token: 'private-access', refresh_token: 'private-refresh', expires_in: 3600 })));
 });
 afterEach(() => { vi.unstubAllGlobals(); setServerAudio(null); setBrowserPlayer(null); });
 
@@ -60,12 +60,29 @@ describe('Authenticated server playback', () => {
     expect(env.SERVER_PLAYERS.get).toHaveBeenCalledWith(id, { locationHint: 'apac' });
     const internal = stub.fetch.mock.calls[0][0];
     expect(internal.url).toBe('http://container/start');
-    expect(await internal.json()).toEqual({ accessToken: 'private-access', name: `Spotify Cloud Player ${pair.id.slice(0, 8)}` });
+    expect(await internal.json()).toEqual({ expectedUsername: 'linked-user', name: `Spotify Cloud Player ${pair.id.slice(0, 8)}` });
     expect(internal.headers.has('Cookie')).toBe(false); expect(internal.headers.has('Authorization')).toBe(false);
-    const body = await result.json(); expect(body.authentication).toBe('accepted'); expect(body.version).toBe(2);
+    const body = await result.json(); expect(body.authentication).toBe('accepted'); expect(body.version).toBe(3);
     expect(JSON.stringify(body)).not.toContain('private-'); expect(result.headers.get('Cache-Control')).toBe('no-store');
     const other = await connection(); await request('/api/server/start', other.cookie, 'POST');
     expect(containers.size).toBe(2);
+  });
+  it('returns only fixed Spotify pairing links to the authenticated receiving session', async () => {
+    const pair = await connection(); await request('/api/server/start', pair.cookie, 'POST');
+    const stub = containers.get(`spotify-player-v1:${pair.id}`);
+    stub.fetch.mockImplementation(async () => Response.json({ ...report, phase: 'waiting_for_pairing', authentication: 'pending', playerRevision: 'native-device-auth-1', authenticationMode: 'device', pairing: { url: 'https://spotify.com/pair?code=ABC123', code: 'ABC123', device_code: 'private-secret' } }));
+    const result = await (await request('/api/server/status', pair.cookie)).json();
+    expect(result).toMatchObject({ version: 3, playerRevision: 'native-device-auth-1', authenticationMode: 'device', pairing: { url: 'https://spotify.com/pair?code=ABC123', code: 'ABC123' } });
+    expect(JSON.stringify(result)).not.toContain('private-secret');
+    stub.fetch.mockImplementation(async () => Response.json({ ...report, phase: 'waiting_for_pairing', pairing: { url: 'https://evil.example/pair?code=ABC123', code: 'ABC123' } }));
+    expect((await (await request('/api/server/status', pair.cookie)).json()).pairing).toBeUndefined();
+    const denied = await request('/api/server/status'); expect(denied.status).toBe(401); expect(await denied.text()).not.toContain('ABC123');
+  });
+  it('does not provision native playback when the linked account cannot be verified', async () => {
+    const pair = await connection();
+    vi.mocked(fetch).mockImplementation(async () => new Response(null, { status: 401 }));
+    expect((await request('/api/server/start', pair.cookie, 'POST')).status).toBe(502);
+    expect(env.SERVER_PLAYERS.get).not.toHaveBeenCalled();
   });
   it('checks mutation origin and methods before consulting account sessions', async () => {
     const pair = await connection();
@@ -109,7 +126,7 @@ describe('Authenticated server playback', () => {
       diagnostics: { revision: 'native-diagnostics-2', nativeExit: { code: 1, signal: null, token: 'private-token' },
         events: [{ event: 'connect_initialization_failed', errorKind: 'Unavailable', reason: 'invalid_credentials', stderr: 'private-token' }] } }));
     const result = await (await request('/api/server/status', pair.cookie)).json();
-    expect(result.version).toBe(2); expect(result.diagnostics.events[0]).toEqual({ event: 'connect_initialization_failed', errorKind: 'Unavailable', reason: 'invalid_credentials' });
+    expect(result.version).toBe(3); expect(result.diagnostics.events[0]).toEqual({ event: 'connect_initialization_failed', errorKind: 'Unavailable', reason: 'invalid_credentials' });
     expect(JSON.stringify(result)).not.toContain('private-token');
   });
   it('stops only the owned session, and stops its runtime before removing credentials on logout', async () => {

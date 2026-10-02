@@ -5,3 +5,5 @@
 !container/player.mjs
 !container/server.mjs
 !container/diagnostics.mjs
+!container/device-auth.mjs
+!container/prepare-librespot.py

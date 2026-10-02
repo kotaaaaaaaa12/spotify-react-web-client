@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
 import { rm, mkdir } from 'node:fs/promises';
+import { Transform } from 'node:stream';
 import { classifyNativeLine, nativeFailureCode, processExit, safeDiagnostics, DIAGNOSTICS_REVISION } from './diagnostics.mjs';
+import { PLAYER_REVISION, safeDevicePairing } from './device-auth.mjs';
 
 const CACHE_DIR = '/tmp/spotify-player-credentials';
 const FFMPEG_ARGS = ['-hide_banner', '-loglevel', 'error', '-f', 's16le', '-ar', '44100', '-ac', '2', '-i', 'pipe:0',
@@ -22,34 +24,37 @@ export class ServerPlayer {
     this.errorCode = null; this.pcmBytes = 0; this.audioBytes = 0; this.name = null;
     this.lastActivity = this.now();
     this.diagnostics = { revision: DIAGNOSTICS_REVISION, events: [] }; this.nativeFailure = null;
+    this.pairing = undefined;
   }
   status() {
-    return { phase: this.phase, authentication: this.authentication, audio: this.audio,
+    return { playerRevision: PLAYER_REVISION, authenticationMode: 'device', pairing: safeDevicePairing(this.pairing), phase: this.phase, authentication: this.authentication, audio: this.audio,
       pcmBytes: this.pcmBytes, audioBytes: this.audioBytes, errorCode: this.errorCode, diagnostics: safeDiagnostics(this.diagnostics) };
   }
   logFailure() {
-    try { this.logger({ component: 'spotify-server-player', ...this.status() }); } catch { /* Logging must not interrupt cleanup. */ }
+    try { const { pairing, ...report } = this.status(); this.logger({ component: 'spotify-server-player', ...report }); } catch { /* Logging must not interrupt cleanup. */ }
   }
   serialize(fn) { const promise = this.queue.then(fn); this.queue = promise.catch(() => {}); return promise; }
-  start({ accessToken, name }) {
+  start({ expectedUsername, name }) {
     return this.serialize(async () => {
-      if (typeof accessToken !== 'string' || accessToken.length < 8 || accessToken.length > 8192 || /[\r\n\0]/.test(accessToken) ||
+      if (typeof expectedUsername !== 'string' || !expectedUsername || expectedUsername.length > 128 || /[\r\n\0]/.test(expectedUsername) ||
           !/^Spotify Cloud Player [a-f0-9]{8}$/.test(name || '')) throw new Error('Invalid player configuration.');
       if (this.native && this.name === name && this.phase !== 'failed') return this.status();
       await this.stopInternal(); this.reset(); this.name = name; this.phase = 'starting';
       await mkdir(this.cacheDir, { recursive: true, mode: 0o700 });
       const generation = ++this.generation;
       const encoder = this.spawnProcess('ffmpeg', FFMPEG_ARGS, { stdio: ['pipe', 'pipe', 'pipe'] });
-      // Keep the token out of command-line arguments and never print process logs.
+      // Device authorization obtains native credentials without the Web API token.
+      const { LIBRESPOT_ACCESS_TOKEN, LIBRESPOT_USERNAME, LIBRESPOT_PASSWORD, ...nativeEnv } = process.env;
       const native = this.spawnProcess('librespot', ['--name', name, '--backend', 'pipe', '--format', 'S16', '--bitrate', '160',
-        '--initial-volume', '100', '--disable-discovery', '--system-cache', this.cacheDir, '--disable-audio-cache'], {
-        env: { ...process.env, LIBRESPOT_ACCESS_TOKEN: accessToken, RUST_LOG: 'librespot=info' }, stdio: ['ignore', 'pipe', 'pipe'],
+        '--initial-volume', '100', '--disable-discovery', '--enable-device-auth', '--system-cache', this.cacheDir, '--disable-audio-cache'], {
+        env: { ...nativeEnv, RUST_LOG: 'librespot=info' }, stdio: ['ignore', 'pipe', 'pipe'],
       });
       this.native = native; this.encoder = encoder;
       const current = () => this.generation === generation;
       const fail = (code, stage) => {
         if (!current() || this.phase === 'failed') return;
         this.phase = 'failed'; this.errorCode = code;
+        this.pairing = undefined;
         if (stage === 'authentication') this.authentication = 'rejected';
         else this.audio = 'failed';
         native.kill('SIGTERM'); encoder.kill('SIGTERM');
@@ -59,20 +64,35 @@ export class ServerPlayer {
       native.on('error', () => fail('native_process_unavailable', 'authentication'));
       encoder.on('error', () => fail('encoder_unavailable', 'audio'));
       encoder.stdin.on('error', () => fail('encoder_input_closed', 'audio'));
-      native.stdout.pipe(encoder.stdin);
+      const pcm = new Transform({ transform: (chunk, encoding, callback) => {
+        callback(null, current() && this.authentication === 'accepted' && this.phase !== 'failed' ? chunk : undefined);
+      } });
+      native.stdout.pipe(pcm).pipe(encoder.stdin);
       native.stdout.on('data', (chunk) => {
-        if (!current() || this.phase === 'failed') return;
+        if (!current() || this.phase === 'failed' || this.authentication !== 'accepted') return;
         this.pcmBytes += chunk.length; this.lastActivity = this.now();
-        this.authentication = 'accepted'; this.audio = 'encoding';
+        this.audio = 'encoding';
       });
       let tail = '';
       const consumeLine = line => {
+        if (this.phase !== 'failed' && this.authentication !== 'accepted') {
+          const url = line.match(/^Browse to: (https:\/\/spotify\.com\/pair(?:\?code=[A-Za-z0-9-]{4,32})?)$/)?.[1];
+          if (url) this.pairing = { url, code: new URL(url).searchParams.get('code') || '' };
+          const code = line.match(/^If prompted, enter code: ([A-Za-z0-9-]{4,32})$/)?.[1];
+          if (code && this.pairing) this.pairing.code = code;
+          if (safeDevicePairing(this.pairing)) this.phase = 'waiting_for_pairing';
+        }
         const evidence = classifyNativeLine(line);
         if (evidence) {
           this.diagnostics.events.push(evidence); this.diagnostics.events = this.diagnostics.events.slice(-12);
           this.nativeFailure = nativeFailureCode(line, evidence) || this.nativeFailure;
         }
-        if (/Authenticated as/i.test(line)) { this.authentication = 'accepted'; if (this.phase !== 'failed') this.phase = 'waiting_for_playback'; }
+        const username = line.match(/Authenticated as (?:'([^']+)'|([^\s]+))/i);
+        if (username && this.phase !== 'failed') {
+          this.pairing = undefined;
+          if ((username[1] || username[2]) !== expectedUsername) { fail('native_account_mismatch', 'authentication'); return; }
+          this.authentication = 'accepted'; this.phase = 'waiting_for_playback';
+        }
         if (/AudioKeyError|audio key.*error|error audio key|Unable to load key/i.test(line)) fail('spotify_audio_key_rejected', 'audio');
         else if (/Unable to read audio file|Skipping to next track, unable to load/i.test(line)) fail('spotify_track_unavailable', 'audio');
         else if (/BadCredentials|Login failed|Authentication failed|invalid.*access.*token/i.test(line)) fail('spotify_authentication_rejected', 'authentication');
@@ -84,7 +104,7 @@ export class ServerPlayer {
       });
       encoder.stderr.on('data', () => {});
       encoder.stdout.on('data', (chunk) => {
-        if (!current() || this.phase === 'failed') return;
+        if (!current() || this.phase === 'failed' || this.authentication !== 'accepted') return;
         this.audioBytes += chunk.length; this.phase = 'streaming'; this.audio = 'received'; this.lastActivity = this.now();
         for (const client of this.clients) {
           // Disconnect slow clients instead of accumulating unbounded audio.

@@ -1,5 +1,6 @@
 import { getPairedSession } from './pairing.mjs';
 import { safeDiagnostics } from '../container/diagnostics.mjs';
+import { PLAYER_REVISION, safeDevicePairing } from '../container/device-auth.mjs';
 
 const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' };
 const json = (data, status = 200) => Response.json(data, { status, headers });
@@ -28,11 +29,21 @@ export async function handleServerPlayback(request, env) {
     if (!env.SERVER_PLAYERS) return json({ error: 'Server playback is unavailable. Apply the Container update and redeploy.' }, 503);
     if (action === 'stop') { await stopServerPlayer(env, paired.id); return json({ version: 1, phase: 'stopped' }); }
     const name = `Spotify Cloud Player ${paired.id.slice(0, 8)}`;
+    let expectedUsername;
+    if (action === 'start') {
+      const accountResponse = await fetch('https://api.spotify.com/v1/me', {
+        headers: { Authorization: `Bearer ${paired.data.access_token}`, Accept: 'application/json' }, redirect: 'error', signal: request.signal,
+      });
+      if (!accountResponse.ok) return json({ error: 'Unable to verify the linked Spotify account. Retry the account connection.' }, 502);
+      const account = await accountResponse.json();
+      if (typeof account.id !== 'string' || !account.id || account.id.length > 128 || /[\r\n\0]/.test(account.id)) return json({ error: 'The linked Spotify account could not be verified.' }, 502);
+      expectedUsername = account.id;
+    }
     const stub = player(env, paired.id);
     const response = await stub.fetch(new Request(`http://container/${action}`, {
       method: request.method,
       headers: action === 'start' ? { 'Content-Type': 'application/json' } : {},
-      body: action === 'start' ? JSON.stringify({ accessToken: paired.data.access_token, name }) : undefined,
+      body: action === 'start' ? JSON.stringify({ expectedUsername, name }) : undefined,
       signal: request.signal,
     }));
     if (!response.ok) {
@@ -46,7 +57,10 @@ export async function handleServerPlayback(request, env) {
     // Return a fixed set of diagnostic fields, never a token or raw process log.
     return json({ phase: report.phase, deviceName: name, authentication: report.authentication, audio: report.audio,
       pcmBytes: report.pcmBytes, audioBytes: report.audioBytes, errorCode: report.errorCode,
-      diagnostics: safeDiagnostics(report.diagnostics), version: 2 });
+      playerRevision: report.playerRevision === PLAYER_REVISION ? PLAYER_REVISION : undefined,
+      authenticationMode: report.authenticationMode === 'device' ? 'device' : undefined,
+      pairing: report.phase === 'waiting_for_pairing' && report.authentication !== 'accepted' ? safeDevicePairing(report.pairing) : undefined,
+      diagnostics: safeDiagnostics(report.diagnostics), version: 3 });
   } catch {
     return json({ error: 'The server player is unavailable. It may still be provisioning. Retry in a moment.', phase: 'failed' }, 503);
   }
