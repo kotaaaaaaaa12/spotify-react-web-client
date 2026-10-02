@@ -53,6 +53,11 @@ const uiSlice = createSlice({
     collapseDetails(state) {
       state.detailsCollapsed = true;
     },
+    collapseRightLayout(state) {
+      state.detailsCollapsed = true;
+      state.queueCollapsed = true;
+      state.devicesCollapsed = true;
+    },
     toggleDetails(state) {
       state.queueCollapsed = true;
       state.libraryCollapsed = true;
@@ -63,9 +68,15 @@ const uiSlice = createSlice({
       state.libraryCollapsed = true;
     },
     openLibrary(state) {
+      state.detailsCollapsed = true;
+      state.queueCollapsed = true;
+      state.devicesCollapsed = true;
       state.libraryCollapsed = false;
     },
     toggleLibrary(state) {
+      state.detailsCollapsed = true;
+      state.queueCollapsed = true;
+      state.devicesCollapsed = true;
       state.libraryCollapsed = !state.libraryCollapsed;
     },
     collapseQueue(state) {

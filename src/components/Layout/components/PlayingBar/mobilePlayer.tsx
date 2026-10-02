@@ -26,7 +26,7 @@ const PlayButton = () => {
 const QueueButton = () => {
   const dispatch = useAppDispatch();
   return (
-    <button onClick={() => dispatch(uiActions.toggleQueue())}>
+    <button aria-label="Queue" onClick={() => dispatch(uiActions.toggleQueue())}>
       <ListIcon />
     </button>
   );

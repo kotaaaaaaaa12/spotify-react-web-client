@@ -49,6 +49,7 @@ const DetailsButton = () => {
     <>
       <Tooltip title={t('Now playing view')}>
         <button
+          aria-label="Now playing view"
           className={active ? 'active-icon-button tablet-hidden' : 'tablet-hidden'}
           onClick={() => dispatch(uiActions.toggleDetails())}
           style={{
@@ -71,6 +72,7 @@ const QueueButton = () => {
   return (
     <Tooltip title={t('Queue')}>
       <button
+        aria-label="Queue"
         onClick={() => dispatch(uiActions.toggleQueue())}
         className={!queueCollapsed ? 'active-icon-button' : ''}
         style={{
@@ -123,6 +125,7 @@ const DeviceButton = () => {
   return (
     <Tooltip title={t('Connect to a device')}>
       <button
+        aria-label="Connect to a device"
         onClick={() => dispatch(uiActions.toggleDevices())}
         className={isDeviceOpen ? 'active-icon-button' : ''}
         style={{ marginTop: 4, cursor: isDeviceOpen ? 'pointer' : 'not-allowed' }}

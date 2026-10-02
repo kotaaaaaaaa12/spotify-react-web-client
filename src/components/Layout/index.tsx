@@ -30,10 +30,10 @@ export const AppLayout: FC<{ children: ReactElement }> = memo((props) => {
   const hasState = useAppSelector((state) => !!state.spotify.state);
   const activeOnOtherDevice = useAppSelector(isActiveOnOtherDevice);
 
-  const [isTablet, setIsTablet] = useState(false);
+  const [isTablet, setIsTablet] = useState(window.innerWidth <= 900);
 
   const isMobile = useIsMobile();
-  const showDetails = rightLayoutOpen && hasState;
+  const showDetails = rightLayoutOpen && hasState && !isTablet;
 
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: 'persistence',
@@ -42,17 +42,21 @@ export const AppLayout: FC<{ children: ReactElement }> = memo((props) => {
   });
 
   useEffect(() => {
-    window.onresize = () => {
-      const vh = window.innerWidth;
-      if (vh < 950) {
+    // Persisted desktop panels must not cover the first mobile page load.
+    if (window.innerWidth <= 900) {
+      dispatch(uiActions.collapseLibrary());
+      dispatch(uiActions.collapseRightLayout());
+    }
+    const onResize = () => {
+      const compact = window.innerWidth <= 900;
+      if (compact) {
         dispatch(uiActions.collapseLibrary());
-        setIsTablet(true);
-      } else {
-        setIsTablet(false);
       }
+      setIsTablet(compact);
     };
+    window.addEventListener('resize', onResize);
     return () => {
-      window.onresize = null;
+      window.removeEventListener('resize', onResize);
     };
   }, [dispatch]);
 
