@@ -85,6 +85,7 @@ const WebPlayback: FC<WebPlaybackProps> = memo((props) => {
       document.removeEventListener('keydown', onInteraction, true);
       player?.disconnect();
       setBrowserPlayer(null);
+      dispatch(spotifyActions.setPlayer({ player: null }));
       playerService.setPlaybackDevice(null);
     };
   }, []);

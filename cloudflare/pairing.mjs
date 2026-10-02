@@ -24,6 +24,17 @@ async function call(env, id, action, data = {}) {
   // Copy the response before attaching or clearing browser cookies.
   return new Response(response.body, response);
 }
+
+export async function getPairedSession(request, env) {
+  if (!env.PAIR_SESSIONS) return { ok: false, response: json({ error: 'QR sessions are unavailable. Redeploy the latest update.' }, 503) };
+  const [id, secret] = readCookie(request, SESSION_COOKIE).split('.');
+  if (!validId(id) || !/^[a-f0-9]{64}$/.test(secret || '')) return { ok: false, response: json({ error: 'Server playback needs a QR session. Sign out and choose Log in with QR.' }, 401) };
+  const response = await call(env, id, 'session', { secret });
+  const data = await response.json();
+  if (!response.ok) return { ok: false, response: json({ error: data.error || 'Your QR session expired. Connect again.' }, response.status) };
+  if (data.status !== 'ready') return { ok: false, response: json({ error: 'Finish signing in on your other device first.' }, 409) };
+  return { ok: true, id, data };
+}
 function page(message, status = 200) {
   const success = status === 200;
   return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Spotify Web Client — QR login</title><style>body{margin:0}*{box-sizing:border-box}${connectionCss}</style><main class="connection-page"><section class="connection-card connection-content"><p class="connection-brand"><span class="connection-mark" aria-hidden="true">♪</span>Spotify Web Client</p>${success ? '<div class="connection-success" aria-hidden="true">✓</div>' : ''}<h1 class="connection-heading">${success ? 'You’re connected' : 'Connection not completed'}</h1><p class="${success ? 'connection-description' : 'connection-error'}">${message}</p><p class="connection-note">${success ? 'Your other browser now has access to your Spotify library.' : 'Create a new QR code on the other device and try again.'}</p></section></main></html>`, {
@@ -86,6 +97,13 @@ export async function handlePairing(request, env, config) {
   }
   const [id, secret] = readCookie(request, SESSION_COOKIE).split('.');
   if (!validId(id) || !/^[a-f0-9]{64}$/.test(secret || '')) return json({ error: 'No device session. Connect again.' }, 401);
+  if (path === 'logout' && env.SERVER_PLAYERS) {
+    // Stop only after the receiver secret has been verified by the session DO.
+    const verification = await call(env, id, 'session', { secret });
+    if (!verification.ok) return verification;
+    try { await env.SERVER_PLAYERS.get(env.SERVER_PLAYERS.idFromName(`spotify-player-v1:${id}`), { locationHint: 'apac' }).stopPlayer(); }
+    catch { return json({ error: 'Unable to stop the server player. Retry signing out.' }, 503); }
+  }
   const response = await call(env, id, path, { secret });
   if (path === 'logout' || response.status === 401 || response.status === 410) response.headers.set('Set-Cookie', cookie(SESSION_COOKIE, '', 0));
   return response;

@@ -5,6 +5,7 @@
   "type": "module",
   "dependencies": {
     "@ant-design/pro-form": "^2.32.0",
+    "@cloudflare/containers": "^0.3.7",
     "antd": "^5.27.2",
     "axios": "^1.18.1",
     "colorthief": "^3.4.0",
@@ -68,9 +69,9 @@
     "sass": "^1.101.3",
     "typescript": "^5.9.3",
     "vite": "^8.1.5",
+    "vitest": "^4.0.0",
     "web-vitals": "^6.0.0",
-    "wrangler": "^4.0.0",
-    "vitest": "^4.0.0"
+    "wrangler": "^4.0.0"
   },
   "engines": {
     "node": ">=22.12.0"

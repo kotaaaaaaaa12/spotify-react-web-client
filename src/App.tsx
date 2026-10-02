@@ -27,6 +27,9 @@ import { playerService } from './services/player';
 import { Spinner } from './components/spinner/spinner';
 import { ConnectionTheme } from './components/DeviceConnection/ConnectionTheme';
 import PlayerDiagnostics from './components/DeviceConnection/PlayerDiagnostics';
+import ServerPlayback from './components/DeviceConnection/ServerPlayback';
+import { hasPairedPlaybackSession, isServerPlaybackEnabled, SERVER_DIALOG_EVENT, SERVER_MODE } from './utils/spotify/serverPlayback';
+import { spotifyActions } from './store/slices/spotify';
 
 const FollowedArtists = lazy(() => import('./pages/FollowedArtists'));
 const Home = lazy(() => import('./pages/Home'));
@@ -63,6 +66,13 @@ const SpotifyContainer: FC<{ children: any }> = memo(({ children }) => {
   const [playerError, setPlayerError] = useState<string>();
   const [playerAttempt, setPlayerAttempt] = useState(0);
   const [retryBusy, setRetryBusy] = useState(false);
+  const [serverEnabled, setServerEnabled] = useState(() => isServerPlaybackEnabled() && hasPairedPlaybackSession());
+  const changePlayerMode = (enabled: boolean) => {
+    if (enabled) localStorage.setItem(SERVER_MODE, '1'); else localStorage.removeItem(SERVER_MODE);
+    playerService.setPlaybackDevice(null); dispatch(spotifyActions.setDeviceId({ deviceId: null }));
+    dispatch(spotifyActions.setState({ state: null }));
+    setPlayerError(undefined); setServerEnabled(enabled); setPlayerAttempt(value => value + 1);
+  };
   const authError = useAppSelector((state) => state.auth.error);
 
   const user = useAppSelector((state) => !!state.auth.user);
@@ -102,7 +112,7 @@ const SpotifyContainer: FC<{ children: any }> = memo(({ children }) => {
     try {
       // A player rejection can happen before the cached token's expiry. Refresh
       // before creating a replacement player, instead of replaying that token.
-      if (playerError) await getPlayerAccessToken(true);
+      if (playerError && !serverEnabled) await getPlayerAccessToken(true);
       await dispatch(initializeSpotifySession()).unwrap();
       setPlayerError(undefined); setPlayerAttempt(value => value + 1);
     } catch (e) { setPlayerError(e instanceof Error ? e.message : 'Unable to reconnect the player.'); }
@@ -112,12 +122,13 @@ const SpotifyContainer: FC<{ children: any }> = memo(({ children }) => {
   const error = authError || playerError;
   const content = <>
     {error ? <ConnectionTheme><Alert className="player-connection-alert" type="error" message={authError ? 'Spotify Web API' : 'Spotify player'} description={error} showIcon
-      action={<Space wrap><Button loading={retryBusy} onClick={() => void retry()}>Retry</Button><PlayerDiagnostics /></Space>}
+      action={<Space wrap><Button loading={retryBusy} onClick={() => void retry()}>Retry</Button><PlayerDiagnostics /><Button onClick={() => window.dispatchEvent(new Event(SERVER_DIALOG_EVENT))}>Server playback</Button></Space>}
       style={{ position: 'fixed', top: 8, left: 8, right: 8, zIndex: 10000 }} /></ConnectionTheme> : null}
     {children}
+    {user ? <ServerPlayback enabled={serverEnabled} onModeChange={changePlayerMode} /> : null}
   </>;
   if (!user) return <Spinner loading={requesting}>{content}</Spinner>;
-  return <WebPlayback key={playerAttempt} {...webPlaybackSdkProps}>{content}</WebPlayback>;
+  return serverEnabled ? content : <WebPlayback key={playerAttempt} {...webPlaybackSdkProps}>{content}</WebPlayback>;
 });
 
 const RoutesComponent = memo(() => {

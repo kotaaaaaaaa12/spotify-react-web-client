@@ -1,0 +1,51 @@
+import { getPairedSession } from './pairing.mjs';
+
+const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' };
+const json = (data, status = 200) => Response.json(data, { status, headers });
+const player = (env, id) => env.SERVER_PLAYERS.get(env.SERVER_PLAYERS.idFromName(`spotify-player-v1:${id}`), { locationHint: 'apac' });
+
+export async function stopServerPlayer(env, id) {
+  if (env.SERVER_PLAYERS) await player(env, id).stopPlayer();
+}
+
+export async function handleServerPlayback(request, env) {
+  const url = new URL(request.url);
+  const action = url.pathname.slice('/api/server/'.length);
+  const methods = { start: 'POST', status: 'GET', stream: 'GET', stop: 'POST' };
+  if (!methods[action]) return json({ error: 'Not found.' }, 404);
+  if (request.method !== methods[action]) return json({ error: 'Method not allowed.' }, 405);
+  if (request.method === 'POST') {
+    const origin = request.headers.get('Origin');
+    const site = request.headers.get('Sec-Fetch-Site');
+    if (origin ? origin !== url.origin : request.headers.get('X-Spotify-Device') !== '1' || (site && site !== 'same-origin')) {
+      return json({ error: 'Request origin could not be verified.' }, 403);
+    }
+  }
+  try {
+    const paired = await getPairedSession(request, env);
+    if (!paired.ok) return paired.response;
+    if (!env.SERVER_PLAYERS) return json({ error: 'Server playback is unavailable. Apply the Container update and redeploy.' }, 503);
+    if (action === 'stop') { await stopServerPlayer(env, paired.id); return json({ version: 1, phase: 'stopped' }); }
+    const name = `Spotify Cloud Player ${paired.id.slice(0, 8)}`;
+    const stub = player(env, paired.id);
+    const response = await stub.fetch(new Request(`http://container/${action}`, {
+      method: request.method,
+      headers: action === 'start' ? { 'Content-Type': 'application/json' } : {},
+      body: action === 'start' ? JSON.stringify({ accessToken: paired.data.access_token, name }) : undefined,
+      signal: request.signal,
+    }));
+    if (!response.ok) {
+      // Platform errors and raw process logs must never reach the browser.
+      return json({ error: response.status === 429 ? 'Container capacity is temporarily limited. Try again shortly.' : 'The server player could not start or respond. Check deployment status and retry.', phase: 'failed' }, response.status === 429 ? 429 : 502);
+    }
+    if (action === 'stream') {
+      return new Response(response.body, { headers: { ...headers, 'Content-Type': 'audio/mpeg', 'Accept-Ranges': 'none' } });
+    }
+    const report = await response.json();
+    // Return a fixed set of diagnostic fields, never a token or raw process log.
+    return json({ phase: report.phase, deviceName: name, authentication: report.authentication, audio: report.audio,
+      pcmBytes: report.pcmBytes, audioBytes: report.audioBytes, errorCode: report.errorCode, version: 1 });
+  } catch {
+    return json({ error: 'The server player is unavailable. It may still be provisioning. Retry in a moment.', phase: 'failed' }, 503);
+  }
+}

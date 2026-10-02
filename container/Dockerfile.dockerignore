@@ -1,0 +1,6 @@
+**
+!container/
+!container/Dockerfile
+!container/Dockerfile.dockerignore
+!container/player.mjs
+!container/server.mjs
