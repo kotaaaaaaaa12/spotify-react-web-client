@@ -36,5 +36,6 @@ export const connectionCss = `
 .connection-modal .ant-modal-title{color:#fff;font-size:24px;line-height:1.3}
 .connection-modal .ant-modal-close{color:#b3b3b3}
 .connection-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+@media(max-width:600px){.player-connection-alert.ant-alert{flex-wrap:wrap;align-items:flex-start}.player-connection-alert .ant-alert-content{flex:1;min-width:0}.player-connection-alert .ant-alert-action{width:100%;margin:12px 0 0;padding-left:26px}}
 @media(max-width:480px){.connection-page{padding:20px 14px}.connection-card{padding:24px 20px}.connection-modal .ant-modal-content{padding:24px 20px}.connection-heading{font-size:26px}.connection-button{padding:10px 16px}}
 `;

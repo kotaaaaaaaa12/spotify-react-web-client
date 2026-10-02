@@ -4,11 +4,10 @@ import './styles/App.scss';
 // Utils
 import i18next from 'i18next';
 import { FC, Suspense, lazy, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getFromLocalStorageWithExpiry } from './utils/localstorage';
-import { getRefreshToken } from './utils/spotify/login';
+import { getPlayerAccessToken } from './utils/spotify/playerDiagnostics';
 
 // Components
-import { Alert, Button, ConfigProvider } from 'antd';
+import { Alert, Button, ConfigProvider, Space } from 'antd';
 import { AppLayout } from './components/Layout';
 import { Route, BrowserRouter as Router, Routes, useLocation } from 'react-router-dom';
 
@@ -27,6 +26,7 @@ import SearchContainer from './pages/Search/Container';
 import { playerService } from './services/player';
 import { Spinner } from './components/spinner/spinner';
 import { ConnectionTheme } from './components/DeviceConnection/ConnectionTheme';
+import PlayerDiagnostics from './components/DeviceConnection/PlayerDiagnostics';
 
 const FollowedArtists = lazy(() => import('./pages/FollowedArtists'));
 const Home = lazy(() => import('./pages/Home'));
@@ -62,10 +62,10 @@ const SpotifyContainer: FC<{ children: any }> = memo(({ children }) => {
   const dispatch = useAppDispatch();
   const [playerError, setPlayerError] = useState<string>();
   const [playerAttempt, setPlayerAttempt] = useState(0);
+  const [retryBusy, setRetryBusy] = useState(false);
   const authError = useAppSelector((state) => state.auth.error);
 
   const user = useAppSelector((state) => !!state.auth.user);
-  const token = useAppSelector((state) => state.auth.token);
   const requesting = useAppSelector((state) => state.auth.requesting);
 
   useEffect(() => {
@@ -78,15 +78,7 @@ const SpotifyContainer: FC<{ children: any }> = memo(({ children }) => {
       playerInitialVolume: 1.0,
       playerRefreshRateMs: 1000,
       playerName: 'Spotify React Player',
-      onPlayerRequestAccessToken: async () => {
-        // Always give the SDK a *fresh* token. Returning the in-memory redux token can hand it
-        // an expired one, which 401s on the SDK's internal `melody/v1/check_scope` call. Prefer
-        // the still-valid stored token; refresh it if it has expired.
-        const stored = getFromLocalStorageWithExpiry('access_token') as string | null;
-        if (stored) return stored;
-        const refreshed = (await getRefreshToken()) as string | null;
-        return refreshed || token || '';
-      },
+      onPlayerRequestAccessToken: () => getPlayerAccessToken(),
       onPlayerLoading: () => {},
       onPlayerWaitingForDevice: () => {
         dispatch(authActions.setPlayerLoaded({ playerLoaded: true }));
@@ -102,16 +94,25 @@ const SpotifyContainer: FC<{ children: any }> = memo(({ children }) => {
         dispatch(authActions.setPlayerLoaded({ playerLoaded: true }));
       },
     }),
-    [dispatch, token]
+    [dispatch]
   );
+
+  const retry = async () => {
+    setRetryBusy(true); dispatch(authActions.clearError());
+    try {
+      // A player rejection can happen before the cached token's expiry. Refresh
+      // before creating a replacement player, instead of replaying that token.
+      if (playerError) await getPlayerAccessToken(true);
+      await dispatch(initializeSpotifySession()).unwrap();
+      setPlayerError(undefined); setPlayerAttempt(value => value + 1);
+    } catch (e) { setPlayerError(e instanceof Error ? e.message : 'Unable to reconnect the player.'); }
+    finally { setRetryBusy(false); }
+  };
 
   const error = authError || playerError;
   const content = <>
-    {error ? <ConnectionTheme><Alert type="error" message={authError ? 'Spotify Web API' : 'Spotify player'} description={error} showIcon
-      action={<Button onClick={() => {
-        setPlayerError(undefined); dispatch(authActions.clearError());
-        dispatch(initializeSpotifySession()); setPlayerAttempt(value => value + 1);
-      }}>Retry</Button>}
+    {error ? <ConnectionTheme><Alert className="player-connection-alert" type="error" message={authError ? 'Spotify Web API' : 'Spotify player'} description={error} showIcon
+      action={<Space wrap><Button loading={retryBusy} onClick={() => void retry()}>Retry</Button><PlayerDiagnostics /></Space>}
       style={{ position: 'fixed', top: 8, left: 8, right: 8, zIndex: 10000 }} /></ConnectionTheme> : null}
     {children}
   </>;

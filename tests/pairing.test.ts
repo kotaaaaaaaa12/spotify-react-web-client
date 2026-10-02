@@ -189,6 +189,17 @@ describe('Paired Spotify Web API relay', () => {
     await req(finishPath(phone), 'GET', phone.cookie);
     return pair;
   }
+  it('allows only the SDK’s exact read-only scope diagnostic with private session authentication', async () => {
+    const pair = await connected();
+    const upstream = vi.fn(async () => Response.json({})); vi.stubGlobal('fetch', upstream);
+    const result = await req('/api/spotify/v1/melody/v1/check_scope?scope=web-playback', 'GET', pair.cookie);
+    expect(result.status).toBe(200);
+    expect(upstream).toHaveBeenCalledWith('https://api.spotify.com/v1/melody/v1/check_scope?scope=web-playback', expect.objectContaining({ method: 'GET', headers: { Authorization: 'Bearer first-access', Accept: 'application/json' } }));
+    for (const path of ['/api/spotify/v1/melody/v1/check_scope?scope=other', '/api/spotify/v1/melody/v1/check_scope?scope=web-playback&extra=1', '/api/spotify/v1/melody/v1/license_url']) expect((await req(path, 'GET', pair.cookie)).status).toBe(400);
+    const mutation = await worker.fetch(new Request(`${origin}/api/spotify/v1/melody/v1/check_scope?scope=web-playback`, { method: 'PUT', headers: { Origin: origin, Cookie: pair.cookie } }), env);
+    expect(mutation.status).toBe(400); expect(upstream).toHaveBeenCalledTimes(1);
+    expect((await req('/api/spotify/v1/melody/v1/check_scope?scope=web-playback')).status).toBe(401);
+  });
   it('uses the server-held account token and preserves query parameters', async () => {
     const pair = await connected();
     const upstream = vi.fn(async () => Response.json({ id: 'account' }));

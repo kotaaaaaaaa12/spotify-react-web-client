@@ -17,6 +17,7 @@ import { useAppDispatch, useAppSelector } from '../../../../store/store';
 import { ARTISTS_DEFAULT_IMAGE } from '../../../../constants/spotify';
 import { signOutSpotify } from '../../../../utils/spotify/login';
 import DeviceConnectionButton from '../../../DeviceConnection';
+import PlayerDiagnostics from '../../../DeviceConnection/PlayerDiagnostics';
 import useIsMobile from '../../../../utils/isMobile';
 
 const LoginButton = () => {
@@ -87,6 +88,7 @@ const Header = ({ opacity }: { opacity: number; title?: string }) => {
           </div> */}
 
           {user ? <Link to="/collection/artists" title="Followed artists" style={{ whiteSpace: 'nowrap', color: '#fff' }}>{isMobile ? 'Artists' : 'Followed artists'}</Link> : null}
+          {user ? <PlayerDiagnostics /> : null}
           {user ? <Button type="text" style={{ color: 'white' }} onClick={() => { setSignOutError(undefined); setSignOutOpen(true); }}>Sign out</Button> : null}
           {user ? (
             <div className='avatar-container'>

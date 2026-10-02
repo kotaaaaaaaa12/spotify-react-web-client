@@ -99,7 +99,11 @@ export async function handleSpotifyApi(request, env) {
   if (!['GET', 'POST', 'PUT', 'DELETE'].includes(request.method)) return json({ error: { message: 'Method not allowed.' } }, 405);
   if (request.method !== 'GET' && !validMutationOrigin(request, url)) return json({ error: { message: 'Request origin could not be verified.' } }, 403);
   const path = url.pathname.slice('/api/spotify'.length);
-  if (!/^\/v1\/(me|users|artists|albums|tracks|playlists|search|browse|markets|episodes|shows|audio-features|audio-analysis|recommendations)(\/[A-Za-z0-9_-]+)*$/.test(path)) {
+  // This exact read-only probe matches the official SDK's scope verification.
+  // It is diagnostic only; the SDK's own cross-origin transport stays direct.
+  const playerScopeCheck = path === '/v1/melody/v1/check_scope' && request.method === 'GET' &&
+    url.searchParams.get('scope') === 'web-playback' && [...url.searchParams.keys()].length === 1;
+  if (!playerScopeCheck && !/^\/v1\/(me|users|artists|albums|tracks|playlists|search|browse|markets|episodes|shows|audio-features|audio-analysis|recommendations)(\/[A-Za-z0-9_-]+)*$/.test(path)) {
     return json({ error: { message: 'Invalid Spotify API path.' } }, 400);
   }
   if (url.search.length > 16384) return json({ error: { message: 'Spotify query is too large.' } }, 414);
