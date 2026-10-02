@@ -1,4 +1,4 @@
-import { handlePairing } from './pairing.mjs';
+import { handlePairing, handleSpotifyApi } from './pairing.mjs';
 export { PairingSession } from './pairing.mjs';
 
 const securityHeaders = {
@@ -38,6 +38,7 @@ function runtimeConfig(url, env) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname.startsWith('/api/spotify/')) return handleSpotifyApi(request, env);
     if (url.pathname.startsWith('/api/pair/') || (url.pathname === '/' && (url.searchParams.get('state') || '').startsWith('pair_'))) {
       const response = runtimeConfig(url, env);
       if (!response.ok) return response;

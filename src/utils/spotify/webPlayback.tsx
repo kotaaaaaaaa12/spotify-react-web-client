@@ -52,7 +52,7 @@ const WebPlayback: FC<WebPlaybackProps> = memo((props) => {
       setBrowserPlayer(player);
       dispatch(spotifyActions.setPlayer({ player }));
       for (const event of ['initialization_error', 'authentication_error', 'account_error', 'playback_error'] as const) {
-        player.addListener(event, ({ message }) => reportError(message));
+        player.addListener(event, ({ message }) => reportError(`Spotify player (${event}): ${message}`));
       }
       player.addListener('autoplay_failed', () => reportError('Your browser blocked audio. Press Play again to enable playback.'));
       player.addListener('player_state_changed', handleState);

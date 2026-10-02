@@ -1,3 +1,5 @@
+import { connectionCss } from './connection-theme.mjs';
+
 const PAIR_TTL = 10 * 60 * 1000;
 const SESSION_TTL = 30 * 24 * 60 * 60 * 1000;
 const SESSION_COOKIE = '__Host-spotify-pair';
@@ -11,6 +13,11 @@ const validId = id => /^[a-f0-9]{32}$/.test(id || '');
 const cookie = (name, value, age) => `${name}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${age}`;
 const readCookie = (request, name) => (request.headers.get('Cookie') || '').split(';').map(x => x.trim()).find(x => x.startsWith(`${name}=`))?.slice(name.length + 1) || '';
 const stub = (env, id) => env.PAIR_SESSIONS.get(env.PAIR_SESSIONS.idFromName(id));
+function validMutationOrigin(request, url) {
+  const origin = request.headers.get('Origin');
+  const site = request.headers.get('Sec-Fetch-Site');
+  return origin ? origin === url.origin : request.headers.get('X-Spotify-Device') === '1' && (!site || site === 'same-origin');
+}
 async function call(env, id, action, data = {}) {
   const response = await stub(env, id).fetch(new Request(`https://internal/${action}`, { method: 'POST', body: JSON.stringify(data) }));
   // Responses crossing a Durable Object boundary have immutable headers.
@@ -18,7 +25,8 @@ async function call(env, id, action, data = {}) {
   return new Response(response.body, response);
 }
 function page(message, status = 200) {
-  return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Spotify device connection</title><style>body{background:#121212;color:#fff;font:18px system-ui;margin:12vh auto;padding:24px;max-width:520px}h1{font-size:28px}a{color:#1ed760}</style><h1>Spotify device connection</h1><p>${message}</p></html>`, {
+  const success = status === 200;
+  return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Spotify Web Client — QR login</title><style>body{margin:0}*{box-sizing:border-box}${connectionCss}</style><main class="connection-page"><section class="connection-card connection-content"><p class="connection-brand"><span class="connection-mark" aria-hidden="true">♪</span>Spotify Web Client</p>${success ? '<div class="connection-success" aria-hidden="true">✓</div>' : ''}<h1 class="connection-heading">${success ? 'You’re connected' : 'Connection not completed'}</h1><p class="${success ? 'connection-description' : 'connection-error'}">${message}</p><p class="connection-note">${success ? 'Your other browser now has access to your Spotify library.' : 'Create a new QR code on the other device and try again.'}</p></section></main></html>`, {
     status, headers: { ...headers, 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" },
   });
 }
@@ -50,9 +58,7 @@ export async function handlePairing(request, env, config) {
   // only with a custom header, which cross-origin scripts cannot send without a
   // successful CORS preflight. This Worker does not allow CORS preflights.
   if (request.method === 'POST') {
-    const origin = request.headers.get('Origin');
-    const site = request.headers.get('Sec-Fetch-Site');
-    if ((origin && origin !== url.origin) || (!origin && (request.headers.get('X-Spotify-Device') !== '1' || (site && site !== 'same-origin')))) {
+    if (!validMutationOrigin(request, url)) {
       return json({ error: 'Request origin could not be verified.' }, 403);
     }
   }
@@ -83,6 +89,65 @@ export async function handlePairing(request, env, config) {
   const response = await call(env, id, path, { secret });
   if (path === 'logout' || response.status === 401 || response.status === 410) response.headers.set('Set-Cookie', cookie(SESSION_COOKIE, '', 0));
   return response;
+}
+
+// Only paired browsers with the receiving device's private cookie can use this
+// relay. The destination is fixed; no browser-supplied bearer token is forwarded.
+export async function handleSpotifyApi(request, env) {
+  const url = new URL(request.url);
+  if (!env.PAIR_SESSIONS) return json({ error: { message: 'Device connections are unavailable. Redeploy the latest update.' } }, 503);
+  if (!['GET', 'POST', 'PUT', 'DELETE'].includes(request.method)) return json({ error: { message: 'Method not allowed.' } }, 405);
+  if (request.method !== 'GET' && !validMutationOrigin(request, url)) return json({ error: { message: 'Request origin could not be verified.' } }, 403);
+  const path = url.pathname.slice('/api/spotify'.length);
+  if (!/^\/v1\/(me|users|artists|albums|tracks|playlists|search|browse|markets|episodes|shows|audio-features|audio-analysis|recommendations)(\/[A-Za-z0-9_-]+)*$/.test(path)) {
+    return json({ error: { message: 'Invalid Spotify API path.' } }, 400);
+  }
+  if (url.search.length > 16384) return json({ error: { message: 'Spotify query is too large.' } }, 414);
+  const [id, secret] = readCookie(request, SESSION_COOKIE).split('.');
+  if (!validId(id) || !/^[a-f0-9]{64}$/.test(secret || '')) return json({ error: { message: 'No device session. Log in with a new QR code.' } }, 401);
+  try {
+    const sessionResponse = await call(env, id, 'session', { secret });
+    const session = await sessionResponse.json();
+    if (!sessionResponse.ok) {
+      const result = json({ error: { message: session.error || 'Device session expired. Log in with a new QR code.' } }, sessionResponse.status);
+      if ([401, 410].includes(result.status)) result.headers.set('Set-Cookie', cookie(SESSION_COOKIE, '', 0));
+      return result;
+    }
+    if (session.status !== 'ready') return json({ error: { message: 'Finish signing in on your phone first.' } }, 409);
+    const upstreamHeaders = { Authorization: `Bearer ${session.access_token}`, Accept: 'application/json' };
+    let body;
+    if (request.method !== 'GET' && request.body) {
+      const contentType = (request.headers.get('Content-Type') || '').split(';')[0].trim();
+      if (!['application/json', 'image/jpeg', 'text/plain'].includes(contentType)) return json({ error: { message: 'Unsupported request content type.' } }, 415);
+      if (Number(request.headers.get('Content-Length')) > 4 * 1024 * 1024) return json({ error: { message: 'Spotify request is too large.' } }, 413);
+      // Bound the actual streamed body too; Content-Length is not trusted.
+      const reader = request.body.getReader();
+      const chunks = []; let size = 0;
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        size += chunk.value.byteLength;
+        if (size > 4 * 1024 * 1024) { await reader.cancel(); return json({ error: { message: 'Spotify request is too large.' } }, 413); }
+        chunks.push(chunk.value);
+      }
+      body = new Uint8Array(size); let offset = 0;
+      for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
+      upstreamHeaders['Content-Type'] = contentType;
+    }
+    const upstream = await fetch(`https://api.spotify.com${path}${url.search}`, {
+      method: request.method, headers: upstreamHeaders, body, redirect: 'manual', signal: AbortSignal.timeout(15000),
+    });
+    // Never follow upstream redirects with account credentials or expose cookies.
+    if (upstream.status >= 300 && upstream.status < 400) return json({ error: { message: 'Spotify returned an unexpected redirect.' } }, 502);
+    const responseHeaders = new Headers(headers);
+    for (const name of ['Content-Type', 'Retry-After']) {
+      const value = upstream.headers.get(name);
+      if (value) responseHeaders.set(name, value);
+    }
+    return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
+  } catch {
+    return json({ error: { message: 'The server could not reach Spotify Web API. Retry in a moment.' } }, 502);
+  }
 }
 
 export class PairingSession {

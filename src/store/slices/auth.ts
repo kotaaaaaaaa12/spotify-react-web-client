@@ -51,9 +51,9 @@ const authSlice = createSlice({
       state.user = action.payload;
       state.requesting = false;
     });
-    builder.addCase(fetchUser.rejected, (state) => {
+    builder.addCase(fetchUser.rejected, (state, action) => {
       state.requesting = false;
-      state.error = 'Unable to load your Spotify account. Check the application allowlist, then reconnect.';
+      state.error = action.error.message || 'Unable to load your Spotify account. Retry the connection.';
     });
     builder.addCase(loginToSpotify.rejected, (state, action) => {
       state.requesting = false;

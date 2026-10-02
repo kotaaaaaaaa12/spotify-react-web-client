@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, ConfigProvider, Modal, QRCode, Space, Typography, theme } from 'antd';
+import { Modal, QRCode, Typography } from 'antd';
 import { DeviceConnection, pairingRequest, savePairedToken } from '../../utils/spotify/pairing';
+import { ConnectionBrand, ConnectionTheme, QrIcon } from './ConnectionTheme';
 
 export default function DeviceConnectionButton() {
   const [open, setOpen] = useState(false);
@@ -39,22 +40,25 @@ export default function DeviceConnectionButton() {
     return () => { active = false; clearTimeout(timer); };
   }, [open, connection]);
 
-  return <ConfigProvider theme={{ algorithm: theme.darkAlgorithm }}>
-    <Button onClick={() => void start()} size="small" style={{ color: '#fff' }}>Connect with phone</Button>
-    <Modal title={<span style={{ color: '#fff' }}>Connect with another device</span>} open={open} onCancel={() => setOpen(false)} footer={null} focusTriggerAfterClose={false}>
-      <Space direction="vertical" size="middle" style={{ width: '100%', color: '#fff' }}>
-        <p>Scan this code with your phone, or open the connection link on another device.</p>
-        <p>Check that both screens show the same verification code before signing in with Spotify.</p>
-        {busy ? <p role="status">Creating a connection...</p> : null}
+  return <ConnectionTheme>
+    <button onClick={() => void start()} className="connection-button connection-button-secondary"><QrIcon />Log in with QR</button>
+    <Modal title="Log in with QR" className="connection-modal" open={open} onCancel={() => setOpen(false)} footer={null} focusTriggerAfterClose={false}
+      styles={{ content: { background: '#121212', border: '1px solid #282828', borderRadius: 12, padding: 28 }, header: { background: 'transparent' } }}>
+      <div className="connection-content">
+        <ConnectionBrand />
+        <div className="connection-steps"><span className="is-active">1 · Scan</span><span>2 · Confirm</span><span>3 · Log in</span></div>
+        <p className="connection-description">Scan with your phone, then sign in to Spotify there to connect this browser.</p>
+        {busy ? <p className="connection-status" role="status">Creating your QR code...</p> : null}
         {connection ? <>
-          <QRCode value={connection.link} bgColor="#ffffff" color="#000000" style={{ margin: '0 auto' }} />
-          <Typography.Title level={3} style={{ textAlign: 'center', letterSpacing: 3, color: '#fff' }}>{connection.code.slice(0, 4)} {connection.code.slice(4)}</Typography.Title>
-          <Typography.Paragraph copyable={{ text: connection.link }} style={{ overflowWrap: 'anywhere', color: '#fff' }}>{connection.link}</Typography.Paragraph>
-          <p>This link expires in ten minutes. Keep this window open until the connection finishes.</p>
+          <div className="connection-qr"><QRCode value={connection.link} size={216} bgColor="#ffffff" color="#000000" bordered={false} style={{ padding: 12, borderRadius: 8 }} /></div>
+          <div className="connection-code"><span className="connection-code-label">Check this code on both screens</span><strong>{connection.code.slice(0, 4)} {connection.code.slice(4)}</strong></div>
+          <div className="connection-link"><Typography.Paragraph copyable={{ text: connection.link }}>{connection.link}</Typography.Paragraph></div>
+          {!error ? <p className="connection-status" role="status"><span className="connection-dot" />Waiting for your phone...</p> : null}
+          <p className="connection-note">Expires in 10 minutes. Keep this window open until sign-in finishes.</p>
         </> : null}
-        {error ? <Alert type="error" showIcon message={error} /> : null}
-        {error ? <Button loading={busy} onClick={() => void start()}>Create a new connection</Button> : null}
-      </Space>
+        {error ? <p className="connection-error" role="alert">{error}</p> : null}
+        {error ? <button className="connection-button connection-button-wide" disabled={busy} onClick={() => void start()}>Create a new QR code</button> : null}
+      </div>
     </Modal>
-  </ConfigProvider>;
+  </ConnectionTheme>;
 }

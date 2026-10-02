@@ -69,7 +69,7 @@ const Header = ({ opacity }: { opacity: number; title?: string }) => {
       style={{ backgroundColor: `rgba(12, 12, 12, ${opacity}%)` }}
     >
       <div className='flex flex-row items-center'>
-        <Space>
+        <Space wrap>
           {!isMobile ? (
             <a
               target='_blank'

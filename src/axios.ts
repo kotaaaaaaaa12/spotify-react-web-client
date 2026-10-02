@@ -2,6 +2,7 @@ import Axios from 'axios';
 import { getRefreshToken } from './utils/spotify/login';
 import { getFromLocalStorageWithExpiry } from './utils/localstorage';
 import { cacheGet, cacheSet } from './utils/cache';
+import { PAIR_MODE } from './utils/spotify/pairing';
 
 const path = 'https://api.spotify.com/v1' as const;
 
@@ -60,7 +61,24 @@ const cacheKeyFor = (config: any) =>
 axios.interceptors.request.use(async (config) => {
   const token = getFromLocalStorageWithExpiry('access_token') || await getRefreshToken();
   if (!token) throw new Error('Sign in with Spotify to browse your music.');
-  config.headers.Authorization = `Bearer ${token}`;
+  if (localStorage.getItem(PAIR_MODE)) {
+    config.baseURL = '/api/spotify/v1';
+    // Accept Spotify pagination URLs, but never let an absolute URL skip the relay.
+    if (/^https?:\/\//.test(config.url || '')) {
+      const target = new URL(config.url!);
+      if (target.origin !== 'https://api.spotify.com' || !target.pathname.startsWith('/v1/')) throw new Error('Invalid Spotify API destination.');
+      config.url = target.pathname.slice('/v1'.length) + target.search;
+    }
+    if (!config.url?.startsWith('/') || config.url.startsWith('//')) throw new Error('Invalid Spotify API path.');
+    config.headers.delete('Authorization');
+    config.headers.set('X-Spotify-Device', '1');
+    config.withCredentials = true;
+  } else {
+    config.baseURL = path;
+    config.headers.Authorization = `Bearer ${token}`;
+    config.headers.delete('X-Spotify-Device');
+    config.withCredentials = false;
+  }
   await acquireSlot();
   (config as any).__hasSlot = true;
 
@@ -105,7 +123,15 @@ axios.interceptors.response.use(
     const config = error?.config;
 
     // Network error / no response — nothing to recover from.
-    if (!response || !config) return Promise.reject(error);
+    if (!response || !config) {
+      if (config && error.code !== 'ERR_CANCELED') {
+        const method = (config.method || 'get').toUpperCase();
+        const endpoint = (config.url || '').split('?')[0];
+        const viaWorker = config.baseURL === '/api/spotify/v1';
+        error.message = `${viaWorker ? 'Unable to reach this site’s Spotify API relay' : 'Unable to reach Spotify Web API'} (${method} ${endpoint}; no HTTP response). Check the connection and retry.`;
+      }
+      return Promise.reject(error);
+    }
 
     if (response.status === 401 && !config.__authRetried) {
       config.__authRetried = true;
@@ -129,6 +155,8 @@ axios.interceptors.response.use(
       return axios(config);
     }
 
+    const message = response.data?.error?.message || (typeof response.data?.error === 'string' ? response.data.error : undefined);
+    error.message = `Spotify Web API (HTTP ${response.status}, ${(config.method || 'get').toUpperCase()} ${(config.url || '').split('?')[0]}): ${message || 'The request failed.'}`;
     return Promise.reject(error);
   }
 );

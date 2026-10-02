@@ -26,6 +26,7 @@ import WebPlayback, { WebPlaybackProps } from './utils/spotify/webPlayback';
 import SearchContainer from './pages/Search/Container';
 import { playerService } from './services/player';
 import { Spinner } from './components/spinner/spinner';
+import { ConnectionTheme } from './components/DeviceConnection/ConnectionTheme';
 
 const FollowedArtists = lazy(() => import('./pages/FollowedArtists'));
 const Home = lazy(() => import('./pages/Home'));
@@ -60,6 +61,7 @@ window.addEventListener('resize', () => {
 const SpotifyContainer: FC<{ children: any }> = memo(({ children }) => {
   const dispatch = useAppDispatch();
   const [playerError, setPlayerError] = useState<string>();
+  const [playerAttempt, setPlayerAttempt] = useState(0);
   const authError = useAppSelector((state) => state.auth.error);
 
   const user = useAppSelector((state) => !!state.auth.user);
@@ -105,13 +107,16 @@ const SpotifyContainer: FC<{ children: any }> = memo(({ children }) => {
 
   const error = authError || playerError;
   const content = <>
-    {error ? <Alert type="error" message="Spotify connection" description={error} showIcon
-      action={<Button onClick={() => { setPlayerError(undefined); dispatch(authActions.clearError()); dispatch(authActions.loginToSpotify()); }}>Reconnect</Button>}
-      style={{ position: 'fixed', top: 8, left: 8, right: 8, zIndex: 10000 }} /> : null}
+    {error ? <ConnectionTheme><Alert type="error" message={authError ? 'Spotify Web API' : 'Spotify player'} description={error} showIcon
+      action={<Button onClick={() => {
+        setPlayerError(undefined); dispatch(authActions.clearError());
+        dispatch(initializeSpotifySession()); setPlayerAttempt(value => value + 1);
+      }}>Retry</Button>}
+      style={{ position: 'fixed', top: 8, left: 8, right: 8, zIndex: 10000 }} /></ConnectionTheme> : null}
     {children}
   </>;
   if (!user) return <Spinner loading={requesting}>{content}</Spinner>;
-  return <WebPlayback {...webPlaybackSdkProps}>{content}</WebPlayback>;
+  return <WebPlayback key={playerAttempt} {...webPlaybackSdkProps}>{content}</WebPlayback>;
 });
 
 const RoutesComponent = memo(() => {

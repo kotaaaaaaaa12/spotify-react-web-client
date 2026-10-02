@@ -182,3 +182,87 @@ describe('Cross-device authorization', () => {
     expect(ns.stores.get(pair.id)!.size).toBe(0);
   });
 });
+
+describe('Paired Spotify Web API relay', () => {
+  async function connected() {
+    const pair = await begin(), phone = await authorize(pair);
+    await req(finishPath(phone), 'GET', phone.cookie);
+    return pair;
+  }
+  it('uses the server-held account token and preserves query parameters', async () => {
+    const pair = await connected();
+    const upstream = vi.fn(async () => Response.json({ id: 'account' }));
+    vi.stubGlobal('fetch', upstream);
+    const result = await worker.fetch(new Request(`${origin}/api/spotify/v1/me/following?type=artist&after=abc`, {
+      headers: { Cookie: pair.cookie, Authorization: 'Bearer attacker-token' },
+    }), env);
+    expect(await result.json()).toEqual({ id: 'account' });
+    expect(upstream).toHaveBeenCalledWith('https://api.spotify.com/v1/me/following?type=artist&after=abc', expect.objectContaining({
+      method: 'GET', redirect: 'manual', headers: { Authorization: 'Bearer first-access', Accept: 'application/json' },
+    }));
+    expect(result.headers.get('Cache-Control')).toBe('no-store');
+  });
+  it('rejects unauthenticated callers, unsupported paths, and unsupported methods', async () => {
+    expect((await req('/api/spotify/v1/me')).status).toBe(401);
+    expect((await req('/api/spotify/v1/https/evil')).status).toBe(400);
+    expect((await req('/api/spotify/v1/me', 'OPTIONS')).status).toBe(405);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it('rejects cross-origin mutations and private cookies from another browser', async () => {
+    const pair = await connected(); vi.mocked(fetch).mockClear();
+    expect((await req('/api/spotify/v1/me/player/play', 'PUT', pair.cookie)).status).toBe(403);
+    const response = await worker.fetch(new Request(`${origin}/api/spotify/v1/me/player/play`, {
+      method: 'PUT', headers: { Origin: 'https://evil.example.com', Cookie: pair.cookie, 'X-Spotify-Device': '1' },
+    }), env);
+    expect(response.status).toBe(403);
+    expect((await req('/api/spotify/v1/me', 'GET', `__Host-spotify-pair=${pair.id}.${'f'.repeat(64)}`)).status).toBe(401);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it('forwards JSON mutations and preserves empty Spotify player responses', async () => {
+    const pair = await connected();
+    const upstream = vi.fn(async () => new Response(null, { status: 204 })); vi.stubGlobal('fetch', upstream);
+    const response = await worker.fetch(new Request(`${origin}/api/spotify/v1/me/player/play`, {
+      method: 'PUT', headers: { Origin: origin, Cookie: pair.cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uris: ['spotify:track:123'] }),
+    }), env);
+    expect(response.status).toBe(204); expect(await response.text()).toBe('');
+    const init = upstream.mock.calls[0][1] as any;
+    expect(JSON.parse(new TextDecoder().decode(init.body))).toEqual({ uris: ['spotify:track:123'] });
+    expect(init.headers['Content-Type']).toBe('application/json');
+    expect(init.headers.Cookie).toBeUndefined();
+  });
+  it('preserves API errors and rate-limit headers while excluding upstream cookies', async () => {
+    const pair = await connected();
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ error: { message: 'Slow down' } }, { status: 429, headers: { 'Retry-After': '4', 'Set-Cookie': 'external=private' } })));
+    const result = await req('/api/spotify/v1/me', 'GET', pair.cookie);
+    expect(result.status).toBe(429); expect(result.headers.get('Retry-After')).toBe('4');
+    expect(result.headers.has('Set-Cookie')).toBe(false);
+    expect(await result.json()).toEqual({ error: { message: 'Slow down' } });
+  });
+  it('does not follow Spotify redirects and gives a distinct server network error', async () => {
+    const pair = await connected();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 302, headers: { Location: 'https://evil.example.com' } })));
+    expect((await req('/api/spotify/v1/me', 'GET', pair.cookie)).status).toBe(502);
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Network error'); }));
+    const response = await req('/api/spotify/v1/me', 'GET', pair.cookie);
+    expect(response.status).toBe(502); expect((await response.json()).error.message).toContain('server could not reach Spotify Web API');
+  });
+  it('clears expired private sessions and refuses API access until phone authorization finishes', async () => {
+    const pair = await begin();
+    expect((await req('/api/spotify/v1/me', 'GET', pair.cookie)).status).toBe(409);
+    vi.setSystemTime(Date.now() + 600001);
+    const expired = await req('/api/spotify/v1/me', 'GET', pair.cookie);
+    expect(expired.status).toBe(410); expect(expired.headers.get('Set-Cookie')).toContain('Max-Age=0');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it('bounds uploaded payloads and rejects unsupported content types', async () => {
+    const pair = await connected(); vi.mocked(fetch).mockClear();
+    for (const [contentType, body, status] of [['text/html', 'html', 415], ['image/jpeg', 'x'.repeat(4 * 1024 * 1024 + 1), 413]] as const) {
+      const result = await worker.fetch(new Request(`${origin}/api/spotify/v1/playlists/id/images`, {
+        method: 'PUT', headers: { Origin: origin, Cookie: pair.cookie, 'Content-Type': contentType }, body,
+      }), env);
+      expect(result.status).toBe(status);
+    }
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});

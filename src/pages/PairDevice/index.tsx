@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { pairingRequest } from '../../utils/spotify/pairing';
+import { ConnectionBrand, ConnectionTheme } from '../../components/DeviceConnection/ConnectionTheme';
 
 export default function PairDevice() {
   const id = new URLSearchParams(location.search).get('id') || '';
@@ -23,21 +24,22 @@ export default function PairDevice() {
       location.assign(url.href);
     } catch (e) { setError(e instanceof Error ? e.message : 'Unable to start Spotify sign-in.'); setBusy(false); }
   };
-  return <main style={{ maxWidth: 520, margin: '8vh auto', padding: 24, color: '#fff', lineHeight: 1.6 }}>
-    <h1 style={{ fontSize: 28, color: '#fff' }}>Connect another device</h1>
-    <p>You are about to connect your Spotify account to another browser.</p>
+  return <ConnectionTheme><main className="connection-page"><section className="connection-card connection-content">
+    <ConnectionBrand />
+    <div className="connection-steps"><span>1 · Scan</span><span className="is-active">2 · Confirm</span><span>3 · Log in</span></div>
+    <h1 className="connection-heading">Log in with QR</h1>
+    <p className="connection-description">Sign in on this phone to connect your Spotify account to the other browser.</p>
     {info ? <>
-      <p>Check that the other device shows this verification code:</p>
-      <p style={{ fontSize: 32, fontWeight: 700, letterSpacing: 4 }}>{info.code.slice(0, 4)} {info.code.slice(4)}</p>
-      <label style={{ display: 'flex', gap: 12, margin: '24px 0' }}>
+      <div className="connection-code"><span className="connection-code-label">Check this code on both screens</span><strong>{info.code.slice(0, 4)} {info.code.slice(4)}</strong></div>
+      <label className="connection-confirm">
         <input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />
         <span>I started this connection and both verification codes match.</span>
       </label>
-      <button disabled={!confirmed || busy} onClick={() => void authorize()} style={{ background: '#1ed760', color: '#000', border: 0, borderRadius: 24, padding: '12px 24px', opacity: !confirmed || busy ? 0.5 : 1 }}>
+      <button className="connection-button connection-button-wide" disabled={!confirmed || busy} onClick={() => void authorize()}>
         {busy ? 'Opening Spotify...' : 'Continue with Spotify'}
       </button>
-      <p>Finish signing in, then return to the other device. This phone does not receive its browser session.</p>
-    </> : !error ? <p role="status">Loading connection...</p> : null}
-    {error ? <p role="alert" style={{ color: '#ffb4b4' }}>{error}</p> : null}
-  </main>;
+      <p className="connection-note">Keep the other window open. It will finish signing in automatically.</p>
+    </> : !error ? <p className="connection-status" role="status">Loading connection...</p> : null}
+    {error ? <p className="connection-error" role="alert">{error}</p> : null}
+  </section></main></ConnectionTheme>;
 }
