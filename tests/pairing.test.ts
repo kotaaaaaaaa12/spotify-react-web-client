@@ -21,7 +21,15 @@ function namespace() {
           setAlarm: async (time: number) => { alarms.set(id, time); },
         } }, {}));
       }
-      return objects.get(id)!;
+      return { fetch: async (request: Request) => {
+        const response = await objects.get(id)!.fetch(request);
+        // Match Workers fetch responses: the caller cannot mutate DO headers.
+        const immutable = new Response(response.body, response);
+        for (const method of ['set', 'append', 'delete'] as const) {
+          Object.defineProperty(immutable.headers, method, { value: () => { throw new TypeError("Can't modify immutable headers."); } });
+        }
+        return immutable;
+      }, alarm: () => objects.get(id)!.alarm() };
     },
   };
 }

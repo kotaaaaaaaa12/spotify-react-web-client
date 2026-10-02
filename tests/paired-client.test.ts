@@ -43,3 +43,14 @@ it('clears revoked paired mode without contacting Spotify from the receiving dev
   expect(localStorage.getItem('spotify_pair_mode')).toBeNull();
   expect(fetch).toHaveBeenCalledTimes(1);
 });
+it('reports the failed operation when a Worker returns an HTML error page', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>Worker error</html>', { status: 500 })));
+  const { pairingRequest } = await import('../src/utils/spotify/pairing');
+  await expect(pairingRequest(`authorize?id=${'f'.repeat(32)}`, 'POST')).rejects.toThrow('HTTP 500, POST /api/pair/authorize');
+});
+it('reports an HTML fallback page and clears expired credentials even without JSON', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>Expired</html>', { status: 410 })));
+  const { pairingRequest } = await import('../src/utils/spotify/pairing');
+  await expect(pairingRequest('session')).rejects.toThrow('HTTP 410, GET /api/pair/session');
+  expect(localStorage.getItem('spotify_pair_mode')).toBeNull();
+});

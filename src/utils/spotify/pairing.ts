@@ -12,12 +12,18 @@ export async function pairingRequest(path: string, method = 'GET') {
     method, credentials: 'same-origin', cache: 'no-store',
     ...(method === 'POST' ? { headers: { 'X-Spotify-Device': '1' } } : {}),
   });
-  const data = await response.json();
+  if (response.status === 401 || response.status === 410) {
+    localStorage.removeItem(PAIR_MODE);
+    localStorage.removeItem('access_token');
+  }
+  let data;
+  try { data = await response.json(); }
+  catch {
+    // Safari otherwise exposes an opaque JSON parsing error for Worker errors
+    // or an HTML fallback page. Include the operation, never session secrets.
+    throw new Error(`Unexpected server response (HTTP ${response.status}, ${method} /api/pair/${path.split('?')[0]}). Redeploy the latest device connection update and start a new connection.`);
+  }
   if (!response.ok) {
-    if (response.status === 401 || response.status === 410) {
-      localStorage.removeItem(PAIR_MODE);
-      localStorage.removeItem('access_token');
-    }
     throw new Error(data.error || 'Unable to connect this device.');
   }
   return data;

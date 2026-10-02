@@ -12,7 +12,10 @@ const cookie = (name, value, age) => `${name}=${value}; Path=/; HttpOnly; Secure
 const readCookie = (request, name) => (request.headers.get('Cookie') || '').split(';').map(x => x.trim()).find(x => x.startsWith(`${name}=`))?.slice(name.length + 1) || '';
 const stub = (env, id) => env.PAIR_SESSIONS.get(env.PAIR_SESSIONS.idFromName(id));
 async function call(env, id, action, data = {}) {
-  return stub(env, id).fetch(new Request(`https://internal/${action}`, { method: 'POST', body: JSON.stringify(data) }));
+  const response = await stub(env, id).fetch(new Request(`https://internal/${action}`, { method: 'POST', body: JSON.stringify(data) }));
+  // Responses crossing a Durable Object boundary have immutable headers.
+  // Copy the response before attaching or clearing browser cookies.
+  return new Response(response.body, response);
 }
 function page(message, status = 200) {
   return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Spotify device connection</title><style>body{background:#121212;color:#fff;font:18px system-ui;margin:12vh auto;padding:24px;max-width:520px}h1{font-size:28px}a{color:#1ed760}</style><h1>Spotify device connection</h1><p>${message}</p></html>`, {
