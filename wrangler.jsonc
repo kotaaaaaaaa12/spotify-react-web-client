@@ -12,8 +12,8 @@
     "not_found_handling": "single-page-application"
   },
   "vars": {
-    "SPOTIFY_CLIENT_ID": "",
-    "SPOTIFY_REDIRECT_URI": ""
+    "SPOTIFY_CLIENT_ID": "84f28df085b8415ebd64f787510f6d7e",
+    "SPOTIFY_REDIRECT_URI": "https://spotify.what-the-fuck.men"
   },
   "observability": { "enabled": true }
 }
