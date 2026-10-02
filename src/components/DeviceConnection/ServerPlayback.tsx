@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Modal, Space } from 'antd';
 import { ConnectionBrand, ConnectionTheme } from './ConnectionTheme';
 import { hasPairedPlaybackSession, SERVER_DIALOG_EVENT, ServerReport, serverPlaybackState, serverRequest } from '../../utils/spotify/serverPlayback';
@@ -24,7 +24,7 @@ const descriptions: Record<string, string> = {
   encoder_exited: 'The audio encoder exited.',
 };
 
-export default function ServerPlayback({ enabled, onModeChange }: { enabled: boolean; onModeChange: (enabled: boolean) => void }) {
+export default function ServerPlayback({ enabled, fallbackReason, onModeChange }: { enabled: boolean; fallbackReason?: string; onModeChange: (enabled: boolean) => void }) {
   const dispatch = useAppDispatch();
   const [open, setOpen] = useState(enabled); const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false); const [report, setReport] = useState<ServerReport>();
@@ -52,7 +52,11 @@ export default function ServerPlayback({ enabled, onModeChange }: { enabled: boo
           setRunning(false); setStreamUrl(undefined); setServerAudio(null);
           playerService.setPlaybackDevice(null); setDeviceId(undefined);
           dispatch(spotifyActions.setDeviceId({ deviceId: null })); dispatch(spotifyActions.setState({ state: null }));
-          if (result.errorCode) { setError(descriptions[result.errorCode] || 'Server playback failed. Copy the report for diagnosis.'); setOpen(true); }
+          if (result.errorCode) {
+            const invalidCredentials = result.diagnostics?.events?.some(event => event.reason === 'invalid_credentials');
+            setError(invalidCredentials ? 'Spotify accepted native login but rejected the credentials used to initialize Spotify Connect. The server cannot play audio. Copy the server report.' : descriptions[result.errorCode] || 'Server playback failed. Copy the report for diagnosis.');
+            setOpen(true);
+          }
           return;
         }
         if (result.authentication === 'accepted') {
@@ -78,7 +82,7 @@ export default function ServerPlayback({ enabled, onModeChange }: { enabled: boo
     return () => { cancelled = true; clearInterval(timer); };
   }, [enabled, running, dispatch]);
 
-  const start = async () => {
+  const start = useCallback(async () => {
     if (operation.current) return; operation.current = true; setBusy(true); setError(undefined); setCopied(false);
     try {
       const result = await serverRequest('start'); if (!alive.current) return;
@@ -87,7 +91,14 @@ export default function ServerPlayback({ enabled, onModeChange }: { enabled: boo
       setStreamUrl(`/api/server/stream?t=${Date.now()}`);
     } catch (e) { if (alive.current) setError(e instanceof Error ? e.message : 'Unable to start the server player.'); }
     finally { operation.current = false; if (alive.current) setBusy(false); }
-  };
+  }, []);
+  useEffect(() => {
+    if (!enabled || !paired) return;
+    setOpen(true);
+    // Defer until SDK cleanup completes. Strict Mode can cancel the first setup.
+    const timer = setTimeout(() => void start(), 0);
+    return () => clearTimeout(timer);
+  }, [enabled, paired, start]);
   const stop = async (disable = false) => {
     if (operation.current) return; operation.current = true; setBusy(true); setError(undefined);
     try {
@@ -115,6 +126,7 @@ export default function ServerPlayback({ enabled, onModeChange }: { enabled: boo
       zIndex={11000} focusTriggerAfterClose={false}>
       <div className="connection-content"><ConnectionBrand />
         <p className="connection-description">Play through this site’s server. Your device receives audio from this site.</p>
+        {fallbackReason ? <p className="connection-note">Switched to server playback automatically because the browser player could not connect: {fallbackReason}</p> : null}
         {!paired ? <p className="connection-error">Server playback needs a QR session. Sign out and choose Log in with QR.</p> : null}
         {!enabled ? <button className="connection-button connection-button-wide" disabled={!paired} onClick={() => { setError(undefined); onModeChange(true); }}>Use server playback</button> : <>
           <p className="connection-status" role="status">{report?.phase === 'streaming' ? 'Server is sending audio' : deviceId ? 'Ready. Choose a track and enable audio.' : running ? 'Connecting the server player...' : 'Server playback selected'}</p>
@@ -123,7 +135,7 @@ export default function ServerPlayback({ enabled, onModeChange }: { enabled: boo
             <button className="connection-button connection-button-secondary" disabled={!streamUrl || busy} onClick={enableAudio}>Enable audio</button>
             <button className="connection-button connection-button-secondary" disabled={busy || !report} onClick={() => void stop()}>Stop server player</button>
           </Space>
-          <p className="connection-note">Start the player, wait until it is ready, enable audio, then close this dialog and choose a song. Playback is experimental.</p>
+          <p className="connection-note">The server starts automatically. Wait until it is ready, enable audio, then close this dialog and choose a song. Playback is experimental. A failed or stopped server needs Start server player to retry.</p>
           <button className="connection-button connection-button-secondary" disabled={busy} onClick={() => void stop(true)}>Use browser playback</button>
         </>}
         {report ? <>

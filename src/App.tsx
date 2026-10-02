@@ -30,6 +30,7 @@ import PlayerDiagnostics from './components/DeviceConnection/PlayerDiagnostics';
 import ServerPlayback from './components/DeviceConnection/ServerPlayback';
 import { hasPairedPlaybackSession, isServerPlaybackEnabled, SERVER_DIALOG_EVENT, SERVER_MODE } from './utils/spotify/serverPlayback';
 import { spotifyActions } from './store/slices/spotify';
+import { shouldUseServerPlayback } from './utils/spotify/browserPlayerConnection';
 
 const FollowedArtists = lazy(() => import('./pages/FollowedArtists'));
 const Home = lazy(() => import('./pages/Home'));
@@ -67,12 +68,16 @@ const SpotifyContainer: FC<{ children: any }> = memo(({ children }) => {
   const [playerAttempt, setPlayerAttempt] = useState(0);
   const [retryBusy, setRetryBusy] = useState(false);
   const [serverEnabled, setServerEnabled] = useState(() => isServerPlaybackEnabled() && hasPairedPlaybackSession());
-  const changePlayerMode = (enabled: boolean) => {
+  const [fallbackReason, setFallbackReason] = useState<string>();
+  const automaticFallbackUsed = useRef(false);
+  const browserChosen = useRef(false);
+  const changePlayerMode = useCallback((enabled: boolean, reason?: string) => {
+    browserChosen.current = !enabled;
     if (enabled) localStorage.setItem(SERVER_MODE, '1'); else localStorage.removeItem(SERVER_MODE);
     playerService.setPlaybackDevice(null); dispatch(spotifyActions.setDeviceId({ deviceId: null }));
     dispatch(spotifyActions.setState({ state: null }));
-    setPlayerError(undefined); setServerEnabled(enabled); setPlayerAttempt(value => value + 1);
-  };
+    setFallbackReason(reason); setPlayerError(undefined); setServerEnabled(enabled);
+  }, [dispatch]);
   const authError = useAppSelector((state) => state.auth.error);
 
   const user = useAppSelector((state) => !!state.auth.user);
@@ -93,18 +98,19 @@ const SpotifyContainer: FC<{ children: any }> = memo(({ children }) => {
       onPlayerWaitingForDevice: () => {
         dispatch(authActions.setPlayerLoaded({ playerLoaded: true }));
       },
-      onPlayerError: (e) => {
-        // Don't re-login on every player error. Non-Premium accounts emit `account_error`
-        // ("premium required") and failed transfers emit errors on each attempt — calling
-        // loginToSpotify() here caused an endless re-login loop. Just surface it; token
-        // refresh is handled by the axios 401 interceptor + onPlayerRequestAccessToken.
+      onPlayerError: (e, reason) => {
+        if (shouldUseServerPlayback(reason) && hasPairedPlaybackSession() && !browserChosen.current && !automaticFallbackUsed.current) {
+          automaticFallbackUsed.current = true;
+          changePlayerMode(true, e);
+          return;
+        }
         setPlayerError(e);
       },
       onPlayerDeviceSelected: () => {
         dispatch(authActions.setPlayerLoaded({ playerLoaded: true }));
       },
     }),
-    [dispatch]
+    [dispatch, changePlayerMode]
   );
 
   const retry = async () => {
@@ -125,10 +131,10 @@ const SpotifyContainer: FC<{ children: any }> = memo(({ children }) => {
       action={<Space wrap><Button loading={retryBusy} onClick={() => void retry()}>Retry</Button><PlayerDiagnostics /><Button onClick={() => window.dispatchEvent(new Event(SERVER_DIALOG_EVENT))}>Server playback</Button></Space>}
       style={{ position: 'fixed', top: 8, left: 8, right: 8, zIndex: 10000 }} /></ConnectionTheme> : null}
     {children}
-    {user ? <ServerPlayback enabled={serverEnabled} onModeChange={changePlayerMode} /> : null}
+    {user ? <ServerPlayback enabled={serverEnabled} fallbackReason={fallbackReason} onModeChange={changePlayerMode} /> : null}
   </>;
   if (!user) return <Spinner loading={requesting}>{content}</Spinner>;
-  return serverEnabled ? content : <WebPlayback key={playerAttempt} {...webPlaybackSdkProps}>{content}</WebPlayback>;
+  return <WebPlayback enabled={!serverEnabled} connectionAttempt={playerAttempt} {...webPlaybackSdkProps}>{content}</WebPlayback>;
 });
 
 const RoutesComponent = memo(() => {
