@@ -1,3 +1,6 @@
+import { handlePairing } from './pairing.mjs';
+export { PairingSession } from './pairing.mjs';
+
 const securityHeaders = {
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
@@ -12,9 +15,34 @@ function json(value, status = 200) {
   });
 }
 
+function runtimeConfig(url, env) {
+  const clientId = (env.SPOTIFY_CLIENT_ID || '').trim();
+  if (!/^[a-fA-F0-9]{32}$/.test(clientId)) {
+    return json({ error: 'Set SPOTIFY_CLIENT_ID to your Spotify application Client ID in wrangler.jsonc, then redeploy.' }, 503);
+  }
+  let redirect;
+  try {
+    redirect = new URL(env.SPOTIFY_REDIRECT_URI || `${url.origin}/`);
+    const local = ['127.0.0.1', '[::1]'].includes(redirect.hostname);
+    if ((redirect.protocol !== 'https:' && !(redirect.protocol === 'http:' && local)) ||
+        redirect.origin !== url.origin || redirect.pathname !== '/' ||
+        redirect.search || redirect.hash || redirect.username || redirect.password) {
+      throw new Error('Invalid redirect');
+    }
+  } catch {
+    return json({ error: 'SPOTIFY_REDIRECT_URI must match this site origin and end in / without a query or fragment.' }, 503);
+  }
+  return json({ clientId, redirectUri: redirect.href });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname.startsWith('/api/pair/') || (url.pathname === '/' && (url.searchParams.get('state') || '').startsWith('pair_'))) {
+      const response = runtimeConfig(url, env);
+      if (!response.ok) return response;
+      return handlePairing(request, env, await response.json());
+    }
     if (!['GET', 'HEAD'].includes(request.method)) {
       return new Response('Method not allowed', {
         status: 405,
@@ -25,23 +53,7 @@ export default {
       return json({ ok: true, service: 'spotify-web-client' });
     }
     if (url.pathname === '/api/config') {
-      const clientId = (env.SPOTIFY_CLIENT_ID || '').trim();
-      if (!/^[a-fA-F0-9]{32}$/.test(clientId)) {
-        return json({ error: 'Set SPOTIFY_CLIENT_ID to your Spotify application Client ID in wrangler.jsonc, then redeploy.' }, 503);
-      }
-      let redirect;
-      try {
-        redirect = new URL(env.SPOTIFY_REDIRECT_URI || `${url.origin}/`);
-        const local = ['127.0.0.1', '[::1]'].includes(redirect.hostname);
-        if ((redirect.protocol !== 'https:' && !(redirect.protocol === 'http:' && local)) ||
-            redirect.origin !== url.origin || redirect.pathname !== '/' ||
-            redirect.search || redirect.hash || redirect.username || redirect.password) {
-          throw new Error('Invalid redirect');
-        }
-      } catch {
-        return json({ error: 'SPOTIFY_REDIRECT_URI must match this site origin and end in / without a query or fragment.' }, 503);
-      }
-      return json({ clientId, redirectUri: redirect.href });
+      return runtimeConfig(url, env);
     }
     if (url.pathname.startsWith('/api/')) return json({ error: 'Not found' }, 404);
 

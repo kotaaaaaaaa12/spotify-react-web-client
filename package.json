@@ -34,6 +34,7 @@
     "underscore": "1.13.8"
   },
   "scripts": {
+    "postinstall": "node scripts/enable-pairing.mjs",
     "start": "vite",
     "dev": "vite",
     "build": "tsc --noEmit && vite build && cp build/index.html build/404.html",

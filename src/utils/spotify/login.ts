@@ -1,5 +1,6 @@
 import { getRuntimeConfig } from '../../runtimeConfig';
 import { getFromLocalStorageWithExpiry, setLocalStorageWithExpiry } from '../localstorage';
+import { PAIR_MODE, refreshPairedToken, signOutPairedSession } from './pairing';
 
 const SCOPES = [
   'ugc-image-upload', 'streaming', 'user-read-email', 'user-read-private',
@@ -24,11 +25,18 @@ const base64url = (bytes: Uint8Array) =>
   btoa(String.fromCharCode(...bytes)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
 
 export function clearSpotifySession() {
+  localStorage.removeItem(PAIR_MODE);
   localStorage.removeItem('access_token');
   localStorage.removeItem('refresh_token');
   localStorage.removeItem('playback_device_id');
   localStorage.removeItem('code_verifier');
   sessionStorage.removeItem(PENDING_LOGIN);
+}
+
+export async function signOutSpotify() {
+  // Keep the confirmation dialog open on a network failure so logout can be retried.
+  await signOutPairedSession();
+  clearSpotifySession();
 }
 
 async function tokenRequest(body: URLSearchParams): Promise<string> {
@@ -43,6 +51,7 @@ async function tokenRequest(body: URLSearchParams): Promise<string> {
     throw new Error(data.error_description || 'Spotify authorization failed. Please sign in again.');
   }
   const token = data as TokenResponse;
+  localStorage.removeItem(PAIR_MODE);
   // Spotify reports seconds; the local storage helper expects milliseconds.
   setLocalStorageWithExpiry('access_token', token.access_token, Math.max(1, token.expires_in - 60) * 1000);
   if (token.refresh_token) localStorage.setItem('refresh_token', token.refresh_token);
@@ -50,6 +59,8 @@ async function tokenRequest(body: URLSearchParams): Promise<string> {
 }
 
 const logInWithSpotify = async (): Promise<void> => {
+  await signOutPairedSession();
+  localStorage.removeItem(PAIR_MODE);
   const { clientId, redirectUri } = getRuntimeConfig();
   const verifier = base64url(crypto.getRandomValues(new Uint8Array(48)));
   const state = base64url(crypto.getRandomValues(new Uint8Array(24)));
@@ -65,6 +76,11 @@ const logInWithSpotify = async (): Promise<void> => {
 
 export const getRefreshToken = async (): Promise<string | null> => {
   if (refreshPromise) return refreshPromise;
+  if (localStorage.getItem(PAIR_MODE)) {
+    refreshPromise = refreshPairedToken();
+    try { return await refreshPromise; }
+    finally { refreshPromise = undefined; }
+  }
   const refreshToken = localStorage.getItem('refresh_token');
   if (!refreshToken) return null;
   refreshPromise = tokenRequest(new URLSearchParams({

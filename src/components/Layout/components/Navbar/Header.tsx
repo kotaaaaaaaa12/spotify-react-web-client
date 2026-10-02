@@ -1,6 +1,6 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 
-import { Button, Modal, Popconfirm, Space } from 'antd';
+import { Alert, Button, ConfigProvider, Modal, Popconfirm, Space, theme } from 'antd';
 import { Link } from 'react-router-dom';
 import { CloseIcon } from '../../../Icons';
 import { WhiteButton } from '../../../Button';
@@ -15,7 +15,8 @@ import { useAppDispatch, useAppSelector } from '../../../../store/store';
 
 // Constants
 import { ARTISTS_DEFAULT_IMAGE } from '../../../../constants/spotify';
-import { clearSpotifySession } from '../../../../utils/spotify/login';
+import { signOutSpotify } from '../../../../utils/spotify/login';
+import DeviceConnectionButton from '../../../DeviceConnection';
 import useIsMobile from '../../../../utils/isMobile';
 
 const LoginButton = () => {
@@ -48,6 +49,14 @@ const LoginButton = () => {
 const Header = ({ opacity }: { opacity: number; title?: string }) => {
   const isMobile = useIsMobile();
   const { t } = useTranslation(['navbar']);
+  const [signOutOpen, setSignOutOpen] = useState(false);
+  const [signOutBusy, setSignOutBusy] = useState(false);
+  const [signOutError, setSignOutError] = useState<string>();
+  const signOut = async () => {
+    setSignOutBusy(true); setSignOutError(undefined);
+    try { await signOutSpotify(); location.assign('/'); }
+    catch (error) { setSignOutError(error instanceof Error ? error.message : 'Unable to sign out. Try again.'); setSignOutBusy(false); }
+  };
 
   const user = useAppSelector(
     (state) => state.auth.user,
@@ -55,7 +64,7 @@ const Header = ({ opacity }: { opacity: number; title?: string }) => {
   );
 
   return (
-    <div
+    <><div
       className={`flex r-0 w-full flex-row items-center justify-between bg-gray-900 rounded-t-md z-10`}
       style={{ backgroundColor: `rgba(12, 12, 12, ${opacity}%)` }}
     >
@@ -78,10 +87,7 @@ const Header = ({ opacity }: { opacity: number; title?: string }) => {
           </div> */}
 
           {user ? <Link to="/collection/artists" title="Followed artists" style={{ whiteSpace: 'nowrap', color: '#fff' }}>{isMobile ? 'Artists' : 'Followed artists'}</Link> : null}
-          {user ? <Button type="text" style={{ color: 'white' }} onClick={() => Modal.confirm({
-            title: 'Sign out of this browser?', content: 'Your Spotify library will stay in your account.',
-            okText: 'Sign out', cancelText: 'Cancel', onOk: () => { clearSpotifySession(); location.assign('/'); },
-          })}>Sign out</Button> : null}
+          {user ? <Button type="text" style={{ color: 'white' }} onClick={() => { setSignOutError(undefined); setSignOutOpen(true); }}>Sign out</Button> : null}
           {user ? (
             <div className='avatar-container'>
               <Link to={`/users/${user!.id}`}>
@@ -97,11 +103,20 @@ const Header = ({ opacity }: { opacity: number; title?: string }) => {
               </Link>
             </div>
           ) : (
-            <LoginButton />
+            <><DeviceConnectionButton /><LoginButton /></>
           )}
         </Space>
       </div>
     </div>
+    <ConfigProvider theme={{ algorithm: theme.darkAlgorithm }}>
+      <Modal title={<span style={{ color: '#fff' }}>Sign out of this browser?</span>} open={signOutOpen}
+        onCancel={() => setSignOutOpen(false)} onOk={() => void signOut()} okText="Sign out" cancelText="Cancel"
+        confirmLoading={signOutBusy} closable={!signOutBusy} maskClosable={!signOutBusy} keyboard={!signOutBusy}
+        cancelButtonProps={{ disabled: signOutBusy, autoFocus: false }} okButtonProps={{ autoFocus: false }} focusTriggerAfterClose={false}>
+        <p style={{ color: '#fff' }}>Your Spotify library will stay in your account.</p>
+        {signOutError ? <Alert type="error" showIcon message={signOutError} /> : null}
+      </Modal>
+    </ConfigProvider></>
   );
 };
 

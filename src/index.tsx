@@ -21,6 +21,11 @@ const root = ReactDOM.createRoot(document.getElementById('root') as HTMLElement)
 async function bootstrap() {
   try {
     await loadRuntimeConfig();
+    if (location.pathname === '/pair') {
+      const { default: PairDevice } = await import('./pages/PairDevice');
+      root.render(<PairDevice />);
+      return;
+    }
     const { default: App } = await import('./App');
     root.render(<App />);
   } catch (error) {
