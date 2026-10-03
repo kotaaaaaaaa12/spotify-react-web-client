@@ -1,5 +1,6 @@
 import { handlePairing, handleSpotifyApi } from './pairing.mjs';
 import { handleServerPlayback } from './server-playback.mjs';
+import { handleSoloist, cloudPairPage } from './soloist.mjs';
 export { PairingSession } from './pairing.mjs';
 
 const securityHeaders = {
@@ -39,6 +40,8 @@ function runtimeConfig(url, env) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname.startsWith('/api/soloist/')) return handleSoloist(request, env);
+    if (url.pathname === '/cloud-pair' && request.method === 'GET') return cloudPairPage();
     if (url.pathname.startsWith('/api/server/')) return handleServerPlayback(request, env);
     if (url.pathname.startsWith('/api/spotify/')) return handleSpotifyApi(request, env);
     if (url.pathname.startsWith('/api/pair/') || (url.pathname === '/' && (url.searchParams.get('state') || '').startsWith('pair_'))) {

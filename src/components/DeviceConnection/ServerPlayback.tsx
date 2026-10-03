@@ -1,13 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Modal, QRCode, Space } from 'antd';
 import { ConnectionBrand, ConnectionTheme } from './ConnectionTheme';
-import { hasPairedPlaybackSession, SERVER_DIALOG_EVENT, ServerReport, ServerPlaybackRequestError, serverPlaybackState, serverRequest } from '../../utils/spotify/serverPlayback';
+import { hasPairedPlaybackSession, SERVER_DIALOG_EVENT, ServerReport, ServerPlaybackRequestError, serverPlaybackState, serverRequest,
+  soloistSettings, newSoloistBridge, SoloistSettings, SoloistBridge } from '../../utils/spotify/serverPlayback';
 import { setServerAudio } from '../../utils/spotify/browserAudio';
 import { playerService } from '../../services/player';
 import { useAppDispatch } from '../../store/store';
 import { spotifyActions } from '../../store/slices/spotify';
 
 const descriptions: Record<string, string> = {
+  soloist_process_unavailable: 'The Container could not start Spotify Soloist. Check its deployment.',
+  soloist_player_exited: 'Spotify Soloist exited. Check your Soloist API key, then copy the server report.',
+  soloist_build_expired: 'This Soloist build expired and could not update. Redeploy to download the current build.',
+  soloist_connect_discovery_failed: 'The Container could not discover Soloist’s Connect interface. Android pairing cannot start. Copy the server report.',
+  soloist_control_unavailable: 'Soloist’s local control interface could not connect. Copy the server report.',
+  soloist_audio_server_unavailable: 'The Container could not start its private audio output.',
+  soloist_audio_server_exited: 'The Container’s audio output stopped.',
+  soloist_audio_capture_unavailable: 'The Container could not capture the Soloist audio output.',
+  soloist_audio_capture_exited: 'The Container’s audio capture stopped.',
+  soloist_session_lost: 'Soloist lost its saved Spotify session. Restart the player and create a new Android pairing link.',
   spotify_authentication_rejected: 'Spotify rejected the server login. Stop the player, create a new QR session, and retry.',
   spotify_audio_key_rejected: 'Spotify accepted the login but rejected audio access for this server player.',
   spotify_track_unavailable: 'The server could not load this track.',
@@ -31,6 +42,8 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
   const [running, setRunning] = useState(false); const [report, setReport] = useState<ServerReport>();
   const [error, setError] = useState<string>(); const [deviceId, setDeviceId] = useState<string>();
   const [streamUrl, setStreamUrl] = useState<string>(); const [copied, setCopied] = useState(false);
+  const [settings, setSettings] = useState<SoloistSettings>(); const [apiKey, setApiKey] = useState('');
+  const [saved, setSaved] = useState(false); const [bridge, setBridge] = useState<SoloistBridge>(); const [bridgeCopied, setBridgeCopied] = useState(false);
   const audio = useRef<HTMLAudioElement>(null); const operation = useRef(false);
   const alive = useRef(true); const polling = useRef(false);
   const paired = hasPairedPlaybackSession();
@@ -40,6 +53,11 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
     return () => { alive.current = false; window.removeEventListener(SERVER_DIALOG_EVENT, show); setServerAudio(null); };
   }, []);
   useEffect(() => { setServerAudio(enabled && streamUrl ? audio.current : null); }, [enabled, streamUrl]);
+  useEffect(() => {
+    if (!open || !paired) return; let cancelled = false;
+    void soloistSettings().then(value => { if (!cancelled) setSettings(value); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [open, paired]);
 
   useEffect(() => {
     if (!enabled || !running) return;
@@ -49,6 +67,9 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
       try {
         const result = await serverRequest('status'); if (cancelled) return;
         setReport(result);
+        if (result.backend === 'soloist') setSettings({ backend: 'soloist', keyConfigured: result.keyConfigured === true, sessionStored: result.sessionStored === true });
+        if (result.sessionStored && result.authentication === 'accepted') setBridge(undefined);
+        if (result.phase === 'setup_required') { setRunning(false); setStreamUrl(undefined); return; }
         if (result.phase === 'failed' || result.phase === 'stopped' || result.phase === 'idle') {
           setRunning(false); setStreamUrl(undefined); setServerAudio(null);
           playerService.setPlaybackDevice(null); setDeviceId(undefined);
@@ -86,11 +107,11 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
   }, [enabled, running, dispatch]);
 
   const start = useCallback(async () => {
-    if (operation.current) return; operation.current = true; setBusy(true); setError(undefined); setCopied(false);
+    if (operation.current) return; operation.current = true; setBusy(true); setError(undefined); setCopied(false); setSaved(false);
     try {
       const result = await serverRequest('start'); if (!alive.current) return;
       playerService.setPlaybackDevice(null); playerService.setPlaybackDeviceName(result.deviceName || null);
-      setDeviceId(undefined); setReport(result); setRunning(true);
+      setDeviceId(undefined); setReport(result); setRunning(result.phase !== 'setup_required' && result.phase !== 'failed'); setBridge(undefined);
       setStreamUrl(result.authentication === 'accepted' ? `/api/server/stream?t=${Date.now()}` : undefined);
     } catch (e) { if (alive.current) {
       if (e instanceof ServerPlaybackRequestError) setReport(e.report);
@@ -111,6 +132,7 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
     try {
       if (enabled && paired) await serverRequest('stop');
       setRunning(false); setStreamUrl(undefined); setDeviceId(undefined); setServerAudio(null);
+      setBridge(undefined);
       playerService.setPlaybackDevice(null); playerService.setPlaybackDeviceName(null);
       dispatch(spotifyActions.setDeviceId({ deviceId: null })); dispatch(spotifyActions.setState({ state: null }));
       setReport({ version: 1, phase: 'stopped' });
@@ -126,6 +148,27 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
     try { await navigator.clipboard.writeText(JSON.stringify(report, null, 2)); setCopied(true); }
     catch { setError('Clipboard access is unavailable. Select and copy the report below.'); }
   };
+  const saveKey = async () => {
+    if (operation.current || !apiKey.trim()) return; operation.current = true; setBusy(true); setError(undefined); setSaved(false);
+    try {
+      const result = await soloistSettings(apiKey.trim()); setSettings(result); setApiKey(''); setSaved(true); setRunning(false); setStreamUrl(undefined); setBridge(undefined);
+      setDeviceId(undefined); setServerAudio(null);
+      playerService.setPlaybackDevice(null); playerService.setPlaybackDeviceName(null);
+      dispatch(spotifyActions.setDeviceId({ deviceId: null })); dispatch(spotifyActions.setState({ state: null }));
+    } catch (e) { setError(e instanceof Error ? e.message : 'Unable to save the Soloist key.'); }
+    finally { operation.current = false; setBusy(false); }
+  };
+  const pairAndroid = async () => {
+    if (operation.current) return; operation.current = true; setBusy(true); setError(undefined); setBridgeCopied(false);
+    try { setBridge(await newSoloistBridge()); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Unable to create the Android pairing link.'); }
+    finally { operation.current = false; setBusy(false); }
+  };
+  const copyBridge = async () => {
+    if (!bridge) return;
+    try { await navigator.clipboard.writeText(bridge.link); setBridgeCopied(true); }
+    catch { setError('Select and copy the Android pairing link below.'); }
+  };
   return <ConnectionTheme>
     {/* Keep the audio element mounted when the settings dialog is closed. */}
     <audio ref={audio} src={streamUrl} preload="none" style={{ display: 'none' }} />
@@ -135,8 +178,27 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
         <p className="connection-description">Play through this site’s server. Your device receives audio from this site.</p>
         {fallbackReason ? <p className="connection-note">Switched to server playback automatically because the browser player could not connect: {fallbackReason}</p> : null}
         {!paired ? <p className="connection-error">Server playback needs a QR session. Sign out and choose Log in with QR.</p> : null}
+        {paired ? <div style={{ marginBottom: 20 }}>
+          <p className="connection-description">Spotify Soloist</p>
+          <p className="connection-note">Soloist runs in Cloudflare. Add your personal <a href="https://developer.spotify.com/dashboard/soloist" target="_blank" rel="noopener noreferrer">Soloist API key</a> once. Your Spotify Client ID is a different value.</p>
+          {saved ? <p className="connection-status" role="status">Saved. Start the server player to continue.</p> : settings?.keyConfigured ? <p className="connection-note">API key saved. {settings.sessionStored ? 'The paired session is saved in Cloudflare.' : 'Complete Android pairing after starting the player.'}</p> : null}
+          <label htmlFor="soloist-api-key" className="connection-note">{settings?.keyConfigured ? 'Replace Soloist API key' : 'Soloist API key'}</label>
+          <input id="soloist-api-key" type="password" autoComplete="off" autoCapitalize="none" spellCheck={false} value={apiKey} onChange={event => { setApiKey(event.target.value); setSaved(false); }}
+            style={{ width: '100%', boxSizing: 'border-box', padding: 12, margin: '8px 0 12px', background: '#000', color: '#fff', border: '1px solid #333', borderRadius: 8 }} />
+          <button className="connection-button connection-button-secondary" disabled={busy || !apiKey.trim()} onClick={() => void saveKey()}>Save Soloist key</button>
+        </div> : null}
         {!enabled ? <button className="connection-button connection-button-wide" disabled={!paired} onClick={() => { setError(undefined); onModeChange(true); }}>Use server playback</button> : <>
-          <p className="connection-status" role="status">{report?.phase === 'streaming' ? 'Server is sending audio' : deviceId ? 'Ready. Choose a track and enable audio.' : running ? 'Connecting the server player...' : 'Server playback selected'}</p>
+          <p className="connection-status" role="status">{report?.phase === 'setup_required' ? 'Add a Soloist API key to continue.' : report?.phase === 'waiting_for_pairing' && report.backend === 'soloist' ? 'Waiting for Android pairing' : report?.phase === 'streaming' ? 'Server is sending audio' : deviceId ? 'Ready. Choose a track and enable audio.' : running ? 'Connecting the server player...' : 'Server playback selected'}</p>
+          {report?.backend === 'soloist' && report.phase === 'waiting_for_pairing' ? <div style={{ marginBottom: 20 }}>
+            <p className="connection-note">Run the Android pairing bridge in Termux, then paste the private link below. Open Spotify on the same Wi-Fi and select {report.deviceName}. Android is only needed for initial pairing.</p>
+            <button className="connection-button" disabled={busy} onClick={() => void pairAndroid()}>{bridge ? 'Create a new Android pairing link' : 'Create Android pairing link'}</button>
+            {bridge ? <>
+              <QRCode value={bridge.link} size={180} color="#000" bgColor="#fff" style={{ margin: '16px auto', padding: 12 }} />
+              <textarea aria-label="Android pairing link" readOnly value={bridge.link} style={{ width: '100%', boxSizing: 'border-box', background: '#000', color: '#bbb', padding: 12, border: '1px solid #333', borderRadius: 8 }} />
+              <button className="connection-button connection-button-secondary" onClick={() => void copyBridge()}>{bridgeCopied ? 'Copied' : 'Copy Android pairing link'}</button>
+              <p className="connection-note">This link expires in 20 minutes and closes after the session is saved. Keep it private.</p>
+            </> : null}
+          </div> : null}
           {report?.pairing ? <div style={{ marginBottom: 20 }}>
             <p className="connection-description">Authorize server playback</p>
             <p className="connection-note">Scan this QR with your phone and approve it using the same Spotify account linked to this site. This authorization is separate from library access.</p>

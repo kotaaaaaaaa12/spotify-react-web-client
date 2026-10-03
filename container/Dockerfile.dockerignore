@@ -7,3 +7,8 @@
 !container/diagnostics.mjs
 !container/device-auth.mjs
 !container/prepare-librespot.py
+!container/soloist-state.mjs
+!container/soloist-discovery.mjs
+!container/soloist-player.mjs
+!container/install-soloist.mjs
+!container/player-router.mjs

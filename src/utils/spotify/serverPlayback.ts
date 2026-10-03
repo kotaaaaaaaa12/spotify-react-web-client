@@ -12,12 +12,31 @@ export interface ServerReport {
   audioBytes?: number;
   errorCode?: string | null;
   playerRevision?: string;
-  authenticationMode?: 'device';
+  backend?: 'soloist';
+  authenticationMode?: 'device' | 'zeroconf';
+  keyConfigured?: boolean;
+  sessionStored?: boolean;
+  sessionRestored?: boolean;
+  pairingRequired?: boolean;
+  discovery?: 'pending' | 'accepted' | 'failed';
   pairing?: { url: string; code: string };
   startup?: { revision: string; stage: string; httpStatus?: number; upstreamStatus?: number };
   diagnostics?: { revision: string; nativeExit?: { code: number | null; signal: string | null };
     encoderExit?: { code: number | null; signal: string | null };
     events: { event: string; errorKind?: string; httpStatus?: number; osErrorCode?: string; reason?: string }[] };
+}
+export interface SoloistSettings { backend: 'soloist'; keyConfigured: boolean; sessionStored: boolean }
+export interface SoloistBridge { link: string; expiresAt: number }
+export async function soloistSettings(apiKey?: string): Promise<SoloistSettings> {
+  return soloistRequest('settings', apiKey === undefined ? undefined : { apiKey });
+}
+export async function newSoloistBridge(): Promise<SoloistBridge> { return soloistRequest('bridge/new', {}); }
+async function soloistRequest(action: string, input?: object) {
+  const response = await fetch(`/api/soloist/${action}`, { method: input === undefined ? 'GET' : 'POST', credentials: 'same-origin', cache: 'no-store',
+    headers: input === undefined ? {} : { 'Content-Type': 'application/json', 'X-Spotify-Device': '1' }, body: input === undefined ? undefined : JSON.stringify(input) });
+  let data; try { data = await response.json(); } catch { throw new Error('Soloist returned an unreadable response. Redeploy the update.'); }
+  if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Soloist settings could not be updated.');
+  return data;
 }
 export const isServerPlaybackEnabled = () => localStorage.getItem(SERVER_MODE) === '1';
 export const hasPairedPlaybackSession = () => !!localStorage.getItem(PAIR_MODE);

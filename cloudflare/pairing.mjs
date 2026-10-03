@@ -101,7 +101,10 @@ export async function handlePairing(request, env, config) {
     // Stop only after the receiver secret has been verified by the session DO.
     const verification = await call(env, id, 'session', { secret });
     if (!verification.ok) return verification;
-    try { await env.SERVER_PLAYERS.get(env.SERVER_PLAYERS.idFromName(`spotify-player-v1:${id}`), { locationHint: 'apac' }).stopPlayer(); }
+    try {
+      const player = env.SERVER_PLAYERS.get(env.SERVER_PLAYERS.idFromName(`spotify-player-v1:${id}`), { locationHint: 'apac' });
+      if (typeof player.forgetPlayer === 'function') await player.forgetPlayer(); else await player.stopPlayer();
+    }
     catch { return json({ error: 'Unable to stop the server player. Retry signing out.' }, 503); }
   }
   const response = await call(env, id, path, { secret });

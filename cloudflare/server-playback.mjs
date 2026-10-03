@@ -70,10 +70,14 @@ export async function handleServerPlayback(request, env) {
     // Return a fixed set of diagnostic fields, never a token or raw process log.
     return json({ phase: report.phase, deviceName: name, authentication: report.authentication, audio: report.audio,
       pcmBytes: report.pcmBytes, audioBytes: report.audioBytes, errorCode: report.errorCode,
-      playerRevision: report.playerRevision === PLAYER_REVISION ? PLAYER_REVISION : undefined,
-      authenticationMode: report.authenticationMode === 'device' ? 'device' : undefined,
+      playerRevision: [PLAYER_REVISION, 'soloist-cloud-1'].includes(report.playerRevision) ? report.playerRevision : undefined,
+      backend: report.backend === 'soloist' ? 'soloist' : undefined,
+      authenticationMode: ['device', 'zeroconf'].includes(report.authenticationMode) ? report.authenticationMode : undefined,
+      ...(report.backend === 'soloist' ? { keyConfigured: report.keyConfigured === true, sessionStored: report.sessionStored === true,
+        sessionRestored: report.sessionRestored === true, pairingRequired: report.pairingRequired === true,
+        discovery: ['pending', 'accepted', 'failed'].includes(report.discovery) ? report.discovery : undefined } : {}),
       pairing: report.phase === 'waiting_for_pairing' && report.authentication !== 'accepted' ? safeDevicePairing(report.pairing) : undefined,
-      diagnostics: safeDiagnostics(report.diagnostics), version: 3 });
+      diagnostics: report.backend === 'soloist' ? safeSoloistDiagnostics(report.diagnostics) : safeDiagnostics(report.diagnostics), version: report.backend === 'soloist' ? 4 : 3 });
   } catch {
     const failures = {
       session: ['server_session_unavailable', 'Unable to read the QR session. Retry the account connection.'],
@@ -84,4 +88,11 @@ export async function handleServerPlayback(request, env) {
     const [code, message] = failures[stage] || ['server_container_request_failed', 'Unable to contact the Container. Check Container deployment and capacity, then retry.'];
     return startupFailure(stage, code, message);
   }
+}
+
+function safeSoloistDiagnostics(value) {
+  if (value?.revision !== 'soloist-diagnostics-1') return undefined;
+  const exit = item => item ? { code: Number.isInteger(item.code) && item.code >= 0 && item.code <= 255 ? item.code : null,
+    signal: ['SIGTERM', 'SIGKILL'].includes(item.signal) ? item.signal : null } : undefined;
+  return { revision: 'soloist-diagnostics-1', events: [], nativeExit: exit(value.nativeExit), encoderExit: exit(value.encoderExit) };
 }
