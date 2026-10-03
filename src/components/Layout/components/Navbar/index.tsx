@@ -13,15 +13,15 @@ export const Navbar = memo(() => {
       justify='space-between'
       style={{ margin: '0 5px' }}
     >
-      <Col>
+      <Col className='navbar-navigation'>
         <HistoryNavigation />
       </Col>
 
-      <Col span={0} md={12} lg={10} xl={8} style={{ textAlign: 'center' }}>
+      <Col className='navbar-search' style={{ textAlign: 'center' }}>
         <Search />
       </Col>
 
-      <Col>
+      <Col className='navbar-actions'>
         <Header opacity={1} />
       </Col>
     </Row>

@@ -1,5 +1,6 @@
 import axios from '../axios';
-import { activateBrowserAudio } from '../utils/spotify/browserAudio';
+import { serverCommand } from '../utils/spotify/serverPlayback';
+import { activateBrowserAudio, serverControlEvent } from '../utils/spotify/browserAudio';
 import type { Pagination } from '../interfaces/api';
 import { Device } from '../interfaces/devices';
 import type { PlayHistoryObject } from '../interfaces/player';
@@ -16,9 +17,24 @@ let playbackDeviceId: string | null = null;
 // by name is the reliable way to find the current device.
 let playbackDeviceName: string | null = null;
 let cloudPlaybackState: 'off' | 'starting' | 'ready' | 'failed' = 'off';
+let cloudSdkControls = false;
+let cloudCommands: Promise<unknown> = Promise.resolve();
+const setCloudSdkControls = (enabled: boolean) => { cloudSdkControls = enabled; };
+let controlSequence = 0; let cloudGeneration = 0;
+const queueCloudOperation = (action: string, operation: () => Promise<any>) => {
+  const sequence = action === 'volume' ? controlSequence : ++controlSequence; const generation = cloudGeneration; serverControlEvent('pending', action);
+  const task = cloudCommands.catch(() => {}).then(async () => {
+    try { if (generation !== cloudGeneration) throw new Error('The server player changed.'); const report = await operation(); if (sequence === controlSequence) serverControlEvent('accepted', action, report); }
+    catch (error) { if (sequence === controlSequence) serverControlEvent('failed', action); throw error; }
+  });
+  cloudCommands = task; return task;
+};
+const commandInCloud = (action: string, value?: number) => queueCloudOperation(action, () => serverCommand(action, value));
 const cloudWaiters = new Set<() => void>();
 const setCloudPlaybackState = (state: typeof cloudPlaybackState) => {
+  if (state !== cloudPlaybackState && ['off', 'starting', 'failed'].includes(state)) { ++cloudGeneration; ++controlSequence; }
   cloudPlaybackState = state;
+  if (state === 'off' || state === 'failed') cloudSdkControls = false;
   if (state !== 'starting') for (const notify of cloudWaiters) notify();
 };
 const waitForCloudPlayback = async () => {
@@ -115,18 +131,23 @@ const startPlayback = async (
   // send that play request to whichever phone happens to be active instead.
   await waitForCloudPlayback();
   if (cloudPlaybackState === 'ready') await activateBrowserAudio();
-  try {
-    await axios.put('/me/player/play', body, { params: deviceParams() });
-  } catch (e: any) {
-    // "Device not found" means the cached id is stale (the SDK reconnected with a new id) or
-    // our device isn't active yet. Re-resolve the live device by name, transfer, and retry.
-    if (e?.response?.status !== 404) throw e;
-    const id = await resolveLiveDeviceId();
-    if (!id) throw e;
-    await axios.put('/me/player', { device_ids: [id] }).catch(() => {});
-    await new Promise((resolve) => setTimeout(resolve, 700));
-    await axios.put('/me/player/play', body, { params: { device_id: id } });
-  }
+  if (cloudPlaybackState === 'ready' && cloudSdkControls && Object.keys(body).length === 0) return commandInCloud('resume');
+  const play = async () => {
+    try {
+      await axios.put('/me/player/play', body, { params: deviceParams() });
+    } catch (e: any) {
+      // "Device not found" means the cached id is stale (the SDK reconnected with a new id) or
+      // our device isn't active yet. Re-resolve the live device by name, transfer, and retry.
+      if (e?.response?.status !== 404) throw e;
+      const id = await resolveLiveDeviceId();
+      if (!id) throw e;
+      await axios.put('/me/player', { device_ids: [id] }).catch(() => {});
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      await axios.put('/me/player/play', body, { params: { device_id: id } });
+    }
+  };
+  if (cloudPlaybackState === 'ready' && cloudSdkControls) return queueCloudOperation('play', play);
+  return play();
 };
 
 // Fire-and-forget transport command. Targets our SDK device (so it doesn't depend on a
@@ -139,6 +160,11 @@ const playerCommand = async (
   params?: Record<string, string | number | boolean>
 ) => {
   if (cloudPlaybackState !== 'off' && (cloudPlaybackState !== 'ready' || !currentDeviceId())) return;
+  const actions: Record<string, string> = { '/me/player/pause': 'pause', '/me/player/next': 'next', '/me/player/previous': 'previous', '/me/player/seek': 'seek', '/me/player/volume': 'volume' };
+  if (cloudPlaybackState === 'ready' && cloudSdkControls && actions[url]) {
+    try { await commandInCloud(actions[url], url.endsWith('/volume') ? Number(params?.volume_percent) / 100 : params?.position_ms as number | undefined); } catch { /* The player dialog receives the failure event. */ }
+    return;
+  }
   try {
     await axios[method](url, {}, { params: { ...deviceParams(), ...params } });
   } catch (e) {
@@ -216,6 +242,7 @@ const getRecentlyPlayed = async (params: { limit?: number; after?: number; befor
 
 export const playerService = {
   setCloudPlaybackState,
+  setCloudSdkControls,
   addToQueue,
   setPlaybackDevice,
   setPlaybackDeviceName,

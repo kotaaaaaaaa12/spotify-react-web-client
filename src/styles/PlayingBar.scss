@@ -476,7 +476,7 @@ button.disabled {
 }
 
 // Keep the floating player visible on tablets in either orientation.
-@media (max-width: $desktop-small-breakpoint), (pointer: coarse) {
+@media (max-width: $desktop-small-breakpoint), (any-pointer: coarse) {
   .desktop-player { display: none !important; }
   .mobile-bar { display: block; }
 }
@@ -509,3 +509,14 @@ button.disabled {
     &::-moz-range-thumb { width: 12px; height: 12px; border: 0; border-radius: 50%; background: white; }
   }
 }
+
+.mini-track-button {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; color: white; text-align: left;
+  cursor: pointer; touch-action: manipulation;
+  .album-cover { flex-shrink: 0; }
+  .mini-track-text { min-width: 0; }
+  .song-title { font-size: 14px; font-weight: 600; }
+  .song-artist { font-size: 12px; color: #ffffffbf; }
+}
+.mobile-player button { min-height: 44px; touch-action: manipulation; }

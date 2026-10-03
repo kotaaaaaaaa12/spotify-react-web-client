@@ -6,6 +6,9 @@ export interface ServerReport {
   version: number;
   phase: string;
   playback?: Spotify.PlaybackState | null;
+  audioTransport?: 'pcm-v1';
+  controls?: 'sdk-v1';
+  audioEpoch?: number;
   deviceName?: string;
   deviceId?: string;
   authentication?: string;
@@ -87,4 +90,11 @@ export function serverPlaybackState(data: any, deviceId: string): Spotify.Playba
     playback_id: item.id || '', playback_quality: 'unknown', playback_features: { hifi_status: 'unknown' },
     track_window: { current_track: item, previous_tracks: [], next_tracks: [] },
   };
+}
+
+export async function serverCommand(action: string, value?: number): Promise<ServerReport> {
+  const response = await fetch('/api/server/control', { method: 'POST', credentials: 'same-origin', cache: 'no-store',
+    headers: { 'Content-Type': 'application/json', 'X-Spotify-Device': '1' }, body: JSON.stringify({ action, ...(value !== undefined ? { value } : {}) }) });
+  if (!response.ok) throw new Error('The server playback control failed. Retry the player.');
+  return response.json();
 }

@@ -17,7 +17,7 @@ const PlayButton = () => {
   return (
     <button
       aria-label={paused ? 'Resume playback' : 'Pause playback'}
-      onClick={() => (!paused ? playerService.pausePlayback() : playerService.startPlayback())}
+      onClick={() => (!paused ? playerService.pausePlayback() : playerService.startPlayback().catch(() => {}))}
     >
       {paused ? <Play /> : <Pause />}
     </button>

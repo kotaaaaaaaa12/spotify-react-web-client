@@ -11,7 +11,7 @@ import { memo } from 'react';
 const ShuffleButton = memo(() => {
   const shuffle = useAppSelector((state) => state.spotify.state?.shuffle);
   return (
-    <button onClick={() => playerService.toggleShuffle(!shuffle).then()}>
+    <button aria-label='Shuffle' onClick={() => playerService.toggleShuffle(!shuffle).then()}>
       <ShuffleIcon active={!!shuffle} />
     </button>
   );
@@ -23,6 +23,7 @@ const SkipBackButton = memo(() => {
   );
   return (
     <button
+      aria-label='Previous track'
       className={disabled ? 'disabled' : ''}
       onClick={() => !disabled && playerService.previousTrack().then()}
     >
@@ -41,12 +42,13 @@ const PlayButton = memo(() => {
 
   return (
     <button
+      aria-label={isPlaying ? 'Pause playback' : 'Resume playback'}
       className={`player-pause-button ${disabled ? 'disabled' : ''}`}
       onClick={() => {
         if (!disabled) {
           return isPlaying
             ? playerService.pausePlayback().then()
-            : playerService.startPlayback().then();
+            : playerService.startPlayback().catch(() => {});
         }
       }}
     >
@@ -61,6 +63,7 @@ const SkipNextButton = memo(() => {
   );
   return (
     <button
+      aria-label='Next track'
       className={disabled ? 'disabled' : ''}
       onClick={() => !disabled && playerService.nextTrack().then()}
     >
@@ -74,6 +77,7 @@ const ReplayButton = memo(() => {
   const looping = repeat_mode === 1 || repeat_mode === 2;
   return (
     <button
+      aria-label='Repeat'
       className={repeat_mode === 2 ? 'active-icon-button' : ''}
       onClick={() =>
         playerService.setRepeatMode(

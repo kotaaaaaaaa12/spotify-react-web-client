@@ -3,6 +3,7 @@ import { AddPlaylistButton } from './AddPlaylistButton';
 import { CloseIcon, LibraryCollapsedIcon, LibraryIcon } from '../../../Icons';
 
 // Utils
+import useCompactLayout from '../../../../utils/useCompactLayout';
 import { memo } from 'react';
 
 // Components
@@ -16,7 +17,7 @@ import { useTranslation } from 'react-i18next';
 import { getLibraryCollapsed, uiActions } from '../../../../store/slices/ui';
 import { useAppDispatch, useAppSelector } from '../../../../store/store';
 
-const isMobile = window.innerWidth < 900;
+
 
 const CloseButton = () => {
   const dispatch = useAppDispatch();
@@ -37,6 +38,7 @@ const CloseButton = () => {
 export const LibraryTitle = memo(() => {
   const dispatch = useAppDispatch();
   const { t } = useTranslation(['navbar']);
+  const isMobile = useCompactLayout();
   const collapsed = useAppSelector(getLibraryCollapsed);
 
   if (collapsed) {
@@ -44,6 +46,7 @@ export const LibraryTitle = memo(() => {
       <Flex vertical align='center' gap={12}>
         <Tooltip placement='right' title={t('Expand your library')}>
           <button
+            aria-label={isMobile ? 'Open your library' : 'Expand your library'}
             style={{
               display: 'flex',
               justifyContent: 'center',

@@ -16,7 +16,7 @@ export const Artist: FC = () => {
         <ArtistsCard
           id={artist.id}
           title={artist?.name}
-          image={artist.images[0].url}
+          image={artist.images?.[0]?.url}
           imageTitle={t('About the artist')}
           extra={<FollowArtistButton id={artist.id} />}
           subtitle={`${artist.followers?.total ?? 0} ${t('followers')}`}

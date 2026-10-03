@@ -1,4 +1,4 @@
-import { memo, useEffect, useState, type FC, type ReactElement } from 'react';
+import { memo, useEffect, type FC, type ReactElement } from 'react';
 
 // Components
 import { Col, Row } from 'antd';
@@ -18,6 +18,7 @@ import { isActiveOnOtherDevice, spotifyActions } from '../../store/slices/spotif
 import { getLibraryCollapsed, isRightLayoutOpen, uiActions } from '../../store/slices/ui';
 import { LoginFooter } from './components/LoginFooter';
 import { LoginModal } from '../Modals/LoginModal';
+import useCompactLayout from '../../utils/useCompactLayout';
 import useIsMobile from '../../utils/isMobile';
 
 const pct = (value: number) => `${value}%`;
@@ -30,7 +31,7 @@ export const AppLayout: FC<{ children: ReactElement }> = memo((props) => {
   const hasState = useAppSelector((state) => !!state.spotify.state);
   const activeOnOtherDevice = useAppSelector(isActiveOnOtherDevice);
 
-  const [isTablet, setIsTablet] = useState(window.innerWidth <= 900);
+  const isTablet = useCompactLayout();
 
   const isMobile = useIsMobile();
   const showDetails = rightLayoutOpen && hasState && !isTablet;
@@ -42,23 +43,8 @@ export const AppLayout: FC<{ children: ReactElement }> = memo((props) => {
   });
 
   useEffect(() => {
-    // Persisted desktop panels must not cover the first mobile page load.
-    if (window.innerWidth <= 900) {
-      dispatch(uiActions.collapseLibrary());
-      dispatch(uiActions.collapseRightLayout());
-    }
-    const onResize = () => {
-      const compact = window.innerWidth <= 900;
-      if (compact) {
-        dispatch(uiActions.collapseLibrary());
-      }
-      setIsTablet(compact);
-    };
-    window.addEventListener('resize', onResize);
-    return () => {
-      window.removeEventListener('resize', onResize);
-    };
-  }, [dispatch]);
+    if (isTablet) { dispatch(uiActions.collapseLibrary()); dispatch(uiActions.collapseRightLayout()); }
+  }, [dispatch, isTablet]);
 
   useEffect(() => {
     if (user) dispatch(spotifyActions.fetchDevices());
@@ -67,7 +53,7 @@ export const AppLayout: FC<{ children: ReactElement }> = memo((props) => {
   // In v4, Panel `style` applies to an inner wrapper — min/max width there no longer
   // constrains the flex item, so unused outer width shows up as a gap. Use size props instead.
   const leftPanelSize = isTablet
-    ? { minSize: pct(10), maxSize: pct(10), defaultSize: pct(10) }
+    ? { minSize: 84, maxSize: 84, defaultSize: 84 }
     : libraryCollapsed
       ? { minSize: 85, maxSize: 85, defaultSize: 85 }
       : { minSize: 280, maxSize: pct(28), defaultSize: pct(22) };
@@ -85,11 +71,12 @@ export const AppLayout: FC<{ children: ReactElement }> = memo((props) => {
       <div className='main-container'>
         <Row
           wrap
+          className='app-shell-grid'
           justify='end'
           gutter={[8, 8]}
           style={{
             overflow: 'hidden',
-            height: `calc(100vh - ${
+            height: `calc(100dvh - ${
               activeOnOtherDevice ? '141' : !user && isMobile ? '0' : '105'
             }px)`,
           }}

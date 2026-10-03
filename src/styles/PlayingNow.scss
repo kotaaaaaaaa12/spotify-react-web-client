@@ -325,3 +325,18 @@
   font-size: 1rem;
   margin-bottom: 10px;
 }
+
+.spotify-mobile-drawer {
+  .ant-drawer-body { overflow-y: auto; padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .playing-section { max-width: 1100px; margin: 0 auto; }
+  .now-playing-content { display: grid; gap: 24px; padding: 16px; }
+  .now-playing-primary, .now-playing-secondary { min-width: 0; }
+  .now-playing-controls > div { width: 100%; margin: 20px 0 12px !important; }
+  .now-playing-controls button { min-width: 44px; min-height: 44px; touch-action: manipulation; }
+  .playing-now-card-image { background-size: contain; background-repeat: no-repeat; background-position: center; aspect-ratio: 1; height: auto; }
+  @media (min-width: 768px) { .now-playing-content { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+}
+
+.spotify-mobile-drawer .now-playing-primary .playing-now-card-image {
+  width: min(100%, 48dvh, 460px); margin-inline: auto;
+}

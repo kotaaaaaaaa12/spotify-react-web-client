@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
+import PlayControls from '../../PlayingBar/PlayControls';
 import { Artist } from './artist';
 import { NextInQueue } from './next';
 import { NowPlayingCard } from './data';
@@ -37,7 +38,7 @@ const Container: FC<{ song: Spotify.Track }> = memo(({ song }) => {
       <div>
         <NowPlayingCard
           title={song.name}
-          image={song.album.images[0].url}
+          image={song.album.images[0]?.url || '/images/playlist.png'}
           albumId={song.album.uri.split(':').reverse()[0]}
           subtitle={
             <span>
@@ -116,7 +117,7 @@ export const Details = memo(() => {
     (a, b) => a?.id === b?.id
   );
 
-  const artistId = useMemo(() => song?.artists[0].uri.split(':')[2], [song]);
+  const artistId = useMemo(() => song?.artists[0]?.uri.split(':')[2], [song]);
 
   useEffect(() => {
     if (artistId) dispatch(fetchArtist(artistId));
@@ -127,10 +128,12 @@ export const Details = memo(() => {
   return (
     <div>
       <DetailsContainer>
-        <div>
-          <Container song={song} />
-          <Artist />
-          <NextInQueue />
+        <div className='now-playing-content'>
+          <div className='now-playing-primary'>
+            <Container song={song} />
+            <div className='now-playing-controls'><PlayControls /></div>
+          </div>
+          <div className='now-playing-secondary'><Artist /><NextInQueue /></div>
         </div>
       </DetailsContainer>
     </div>

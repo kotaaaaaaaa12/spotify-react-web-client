@@ -935,3 +935,32 @@
     height: 14px !important;
   }
 }
+
+.navbar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px !important;
+  > .ant-col { width: auto; min-width: 0; max-width: 100%; padding: 0 !important; }
+  .search-input { min-width: 0 !important; width: 100%; }
+  .search-input input { min-width: 0; font-size: 16px; }
+}
+
+@media (max-width: 1400px), (any-pointer: coarse) {
+  .navbar { grid-template-columns: auto minmax(0, 1fr); }
+  .navbar-actions { grid-column: 1 / -1; }
+  .navbar .search-shortcut { display: none; }
+}
+
+@media (max-width: 767px) {
+  .navbar-search { display: none; }
+}
+
+.app-shell-grid {
+  display: grid !important;
+  grid-template-rows: auto minmax(0, 1fr);
+  > .ant-col { min-height: 0; }
+}
+
+.navbar-search > .ant-space { display: flex; width: 100%; }
+.navbar-search > .ant-space > .ant-space-item:last-child { flex: 1; min-width: 0; }

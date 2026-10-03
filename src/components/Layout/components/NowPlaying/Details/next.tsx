@@ -21,7 +21,7 @@ export const NextInQueue: FC = memo(() => {
   const dispatch = useAppDispatch();
 
   const item = useAppSelector(
-    (state) => state.queue.queue[0],
+    (state) => state.queue.queue?.[0],
     (prev, next) => prev?.id === next?.id
   ) as any as Track;
 
@@ -54,7 +54,7 @@ export const NextInQueue: FC = memo(() => {
             <img
               alt={item.album?.name || ''}
               className='album-cover'
-              src={item.album?.images[0].url}
+              src={item.album?.images?.[0]?.url || '/images/playlist.png'}
             />
           </div>
 

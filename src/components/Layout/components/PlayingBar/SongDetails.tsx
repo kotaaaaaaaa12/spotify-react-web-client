@@ -51,6 +51,16 @@ const SongDetails: FC<{ isMobile?: boolean }> = memo((props) => {
 
   if (!current_track) return <div className='mobile-hidden' style={{ minWidth: 295 }}></div>;
 
+  if (props.isMobile) return (
+    <button type='button' className='mini-track-button' aria-label='Open now playing' onClick={() => dispatch(uiActions.openDetails())}>
+      <img alt='Album cover' className='album-cover' src={current_track.album.images[0]?.url || '/images/playlist.png'} />
+      <span className='mini-track-text'>
+        <span className='song-title' title={current_track.name}>{current_track.name}</span>
+        <span className='song-artist'>{current_track.artists.map(artist => artist.name).join(', ')}</span>
+      </span>
+    </button>
+  );
+
   return (
     <div className='flex flex-row items-center playing-container'>
       <div style={{ marginRight: 15 }}>

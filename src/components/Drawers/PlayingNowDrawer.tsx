@@ -1,4 +1,5 @@
-import { memo, useLayoutEffect, useState } from 'react';
+import useCompactLayout from '../../utils/useCompactLayout';
+import { memo } from 'react';
 
 // Components
 import { ConfigProvider, Drawer, theme } from 'antd';
@@ -8,21 +9,8 @@ import { PlayingNow } from '../Layout/components/NowPlaying';
 import { useAppDispatch, useAppSelector } from '../../store/store';
 import { isRightLayoutOpen, uiActions } from '../../store/slices/ui';
 
-function useWindowSize() {
-  const [size, setSize] = useState([window.innerWidth, window.innerHeight]);
-  useLayoutEffect(() => {
-    function updateSize() {
-      setSize([window.innerWidth, window.innerHeight]);
-    }
-    window.addEventListener('resize', updateSize);
-    updateSize();
-    return () => window.removeEventListener('resize', updateSize);
-  }, []);
-  return size;
-}
-
 export const PlayingNowDrawer = memo(() => {
-  const [width] = useWindowSize();
+  const compact = useCompactLayout();
   const dispatch = useAppDispatch();
 
   const open = useAppSelector(isRightLayoutOpen);
@@ -30,7 +18,7 @@ export const PlayingNowDrawer = memo(() => {
   const hasTrack = useAppSelector((state) => !!state.spotify.state?.track_window.current_track);
   const devices = useAppSelector((state) => !state.ui.devicesCollapsed);
 
-  if (width > 900) return null;
+  if (!compact) return null;
 
   return (
     <ConfigProvider theme={{ algorithm: theme.darkAlgorithm }}>

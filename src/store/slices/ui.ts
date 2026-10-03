@@ -58,6 +58,9 @@ const uiSlice = createSlice({
       state.queueCollapsed = true;
       state.devicesCollapsed = true;
     },
+    openDetails(state) {
+      state.queueCollapsed = true; state.libraryCollapsed = true; state.devicesCollapsed = true; state.detailsCollapsed = false;
+    },
     toggleDetails(state) {
       state.queueCollapsed = true;
       state.libraryCollapsed = true;

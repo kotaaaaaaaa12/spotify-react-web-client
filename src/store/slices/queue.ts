@@ -17,7 +17,7 @@ const initialState: QueueState = {
 
 export const fetchQueue = createAsyncThunk('queue/fetchQueue', async () => {
   const response = await userService.fetchQueue();
-  return response.data.queue;
+  return Array.isArray(response.data?.queue) ? response.data.queue : [];
 });
 
 const queueSlice = createSlice({

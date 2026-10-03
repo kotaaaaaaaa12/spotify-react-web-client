@@ -1,4 +1,5 @@
-import { memo, useLayoutEffect, useState } from 'react';
+import useCompactLayout from '../../utils/useCompactLayout';
+import { memo } from 'react';
 
 // Components
 import { ConfigProvider, Drawer, theme } from 'antd';
@@ -8,26 +9,13 @@ import { useAppDispatch, useAppSelector } from '../../store/store';
 import { uiActions } from '../../store/slices/ui';
 import YourLibrary from '../Layout/components/Library/list';
 
-function useWindowSize() {
-  const [size, setSize] = useState([window.innerWidth, window.innerHeight]);
-  useLayoutEffect(() => {
-    function updateSize() {
-      setSize([window.innerWidth, window.innerHeight]);
-    }
-    window.addEventListener('resize', updateSize);
-    updateSize();
-    return () => window.removeEventListener('resize', updateSize);
-  }, []);
-  return size;
-}
-
 export const LibraryDrawer = memo(() => {
-  const [width] = useWindowSize();
+  const compact = useCompactLayout();
   const dispatch = useAppDispatch();
 
   const open = useAppSelector((state) => !state.ui.libraryCollapsed);
 
-  if (width > 900) return null;
+  if (!compact) return null;
 
   return (
     <ConfigProvider theme={{ algorithm: theme.darkAlgorithm }}>

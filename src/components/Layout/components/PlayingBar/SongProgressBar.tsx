@@ -8,13 +8,14 @@ import { msToTime } from '../../../../utils';
 // Redux
 import { useAppSelector } from '../../../../store/store';
 import { playerService } from '../../../../services/player';
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 
 const SongProgressBar = memo(() => {
   const loaded = useAppSelector((state) => !!state.spotify.state);
   const position = useAppSelector((state) => state.spotify.state?.position);
   const duration = useAppSelector((state) => state.spotify.state?.duration);
 
+  const gesture = useRef(false);
   const [value, setValue] = useState<number>(0);
   const [selecting, setSelecting] = useState<boolean>(false);
 
@@ -32,13 +33,15 @@ const SongProgressBar = memo(() => {
           isEnabled
           value={value}
           onChangeStart={() => {
-            setSelecting(true);
+            gesture.current = true; setSelecting(true);
           }}
           onChange={(value) => {
             setValue(value);
           }}
           onChangeEnd={(value) => {
-            setSelecting(false);
+            // The legacy slider calls this with null when it unmounts.
+            if (!gesture.current || !Number.isFinite(value)) { gesture.current = false; return; }
+            gesture.current = false; setSelecting(false);
             if (!loaded) return;
             setValue(value);
             const newPosition = Math.round((duration || 0) * value);

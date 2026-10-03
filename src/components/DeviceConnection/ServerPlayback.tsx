@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Modal, Space } from 'antd';
 import { ConnectionBrand, ConnectionTheme } from './ConnectionTheme';
 import { hasPairedPlaybackSession, SERVER_DIALOG_EVENT, ServerReport, ServerPlaybackRequestError, serverPlaybackState, serverRequest } from '../../utils/spotify/serverPlayback';
-import { setServerAudio } from '../../utils/spotify/browserAudio';
+import { AudioTiming, LowLatencyAudio, supportsLiveAudio } from '../../utils/spotify/lowLatencyAudio';
+import { SERVER_CONTROL_EVENT, setServerAudio } from '../../utils/spotify/browserAudio';
 import { playerService } from '../../services/player';
 import { useAppDispatch } from '../../store/store';
 import { spotifyActions } from '../../store/slices/spotify';
@@ -40,13 +41,15 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
   const audio = useRef<HTMLAudioElement>(null); const operation = useRef(false);
   const alive = useRef(true); const polling = useRef(false); const epoch = useRef(0);
   const playback = useRef<{ state: Spotify.PlaybackState; receivedAt: number } | null>(null);
+  const liveAudio = useRef<LowLatencyAudio | null>(null); const timing = useRef<AudioTiming | null>(null);
   const paired = hasPairedPlaybackSession();
   const updatePlayback = useCallback((state: Spotify.PlaybackState | null) => {
     playback.current = state ? { state, receivedAt: Date.now() } : null;
     dispatch(spotifyActions.setState({ state }));
   }, [dispatch]);
   const clearDevice = useCallback(() => {
-    playback.current = null;
+    playback.current = null; liveAudio.current?.dispose(); liveAudio.current = null; timing.current = null;
+    playerService.setCloudSdkControls(false);
     setStreamUrl(undefined); setDeviceId(undefined); setServerAudio(null);
     playerService.setPlaybackDevice(null); playerService.setPlaybackDeviceName(null);
     dispatch(spotifyActions.setDeviceId({ deviceId: null })); dispatch(spotifyActions.setState({ state: null }));
@@ -54,12 +57,21 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
   useEffect(() => {
     alive.current = true;
     const show = () => setOpen(true); window.addEventListener(SERVER_DIALOG_EVENT, show);
-    return () => { alive.current = false; ++epoch.current; window.removeEventListener(SERVER_DIALOG_EVENT, show); setServerAudio(null); playerService.setCloudPlaybackState('off'); };
+    return () => { alive.current = false; ++epoch.current; window.removeEventListener(SERVER_DIALOG_EVENT, show); liveAudio.current?.dispose(); liveAudio.current = null; setServerAudio(null); playerService.setCloudPlaybackState('off'); };
   }, []);
   useEffect(() => {
-    setServerAudio(enabled && streamUrl ? audio.current : null);
+    if (!enabled) { liveAudio.current?.dispose(); liveAudio.current = null; setServerAudio(null); return; }
+    if (enabled && streamUrl && report?.audioTransport === 'pcm-v1' && supportsLiveAudio()) {
+      if (!liveAudio.current) {
+        const player = liveAudio.current = new LowLatencyAudio(state => updatePlayback(state), value => { timing.current = value; }, () => {
+          if (alive.current) { clearDevice(); setRunning(false); playerService.setCloudPlaybackState('failed'); setError('The live audio connection stopped. Retry the server player.'); setOpen(true); }
+        });
+        player.connect('/api/server/pcm');
+      }
+      setServerAudio(liveAudio.current);
+    } else setServerAudio(enabled && streamUrl ? audio.current : null);
     if (enabled && streamUrl && deviceId) playerService.setCloudPlaybackState('ready');
-  }, [enabled, streamUrl, deviceId]);
+  }, [enabled, streamUrl, deviceId, report?.audioTransport, updatePlayback, clearDevice]);
   const acceptReport = useCallback((result: ServerReport) => {
     setReport(result);
     if (['failed', 'stopped', 'idle', 'setup_required'].includes(result.phase)) {
@@ -72,20 +84,21 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
     }
     setRunning(true);
     if (result.authentication === 'accepted' && result.deviceId) {
+      playerService.setCloudSdkControls(result.controls === 'sdk-v1');
       setDeviceId(result.deviceId); playerService.setPlaybackDevice(result.deviceId);
       playerService.setPlaybackDeviceName(result.deviceName || null);
       dispatch(spotifyActions.setDeviceId({ deviceId: result.deviceId })); dispatch(spotifyActions.setActiveDevice({ activeDevice: result.deviceId }));
       setStreamUrl(current => current || `/api/server/stream?t=${Date.now()}`);
       // SDK state belongs to this exact Container. A Web API read can lag or
       // return no active device even while its audio is already playing.
-      if (Object.prototype.hasOwnProperty.call(result, 'playback')) updatePlayback(result.playback || null);
+      if (!(result.audioTransport === 'pcm-v1' && supportsLiveAudio()) && Object.prototype.hasOwnProperty.call(result, 'playback')) updatePlayback(result.playback || null);
     }
   }, [clearDevice, dispatch, updatePlayback]);
   useEffect(() => {
     if (!enabled || !running) return;
     const timer = setInterval(() => {
       const snapshot = playback.current;
-      if (!snapshot || snapshot.state.paused) return;
+      if (!snapshot || snapshot.state.paused || liveAudio.current) return;
       dispatch(spotifyActions.setState({ state: { ...snapshot.state,
         position: Math.min(snapshot.state.duration, snapshot.state.position + Math.max(0, Date.now() - snapshot.receivedAt)) } }));
     }, 1000);
@@ -114,6 +127,22 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
     void check(); const timer = setInterval(() => void check(), 2000);
     return () => { cancelled = true; clearInterval(timer); };
   }, [enabled, running, updatePlayback, acceptReport, clearDevice]);
+  useEffect(() => {
+    const control = (event: Event) => {
+      const { phase, action, report: result } = (event as CustomEvent).detail;
+      if (!enabled) return;
+      if (phase === 'pending' && ['pause', 'resume'].includes(action) && playback.current) {
+        updatePlayback({ ...playback.current.state, paused: action === 'pause' });
+      }
+      if (phase === 'accepted' && result) {
+        setReport(result);
+        if (result.playback?.paused && result.playback.track_window.current_track.uri === playback.current?.state.track_window.current_track.uri) updatePlayback(result.playback);
+      }
+      if (phase === 'failed') { setError('The playback control failed. Retry the server player.'); setOpen(true); }
+    };
+    window.addEventListener(SERVER_CONTROL_EVENT, control);
+    return () => window.removeEventListener(SERVER_CONTROL_EVENT, control);
+  }, [enabled, updatePlayback]);
   const start = useCallback(async () => {
     if (operation.current) return; operation.current = true; ++epoch.current;
     playerService.setCloudPlaybackState('starting');
@@ -133,6 +162,7 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
   }, [enabled, paired, start]);
   const stop = async (disable = false) => {
     if (operation.current) return; operation.current = true; ++epoch.current; setBusy(true); setError(undefined);
+    setRunning(false); clearDevice(); playerService.setCloudPlaybackState('failed');
     try {
       if (enabled && paired) await serverRequest('stop');
       setRunning(false); clearDevice(); playerService.setCloudPlaybackState(disable ? 'off' : 'failed');
@@ -141,11 +171,11 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
     finally { operation.current = false; setBusy(false); }
   };
   const copy = async () => {
-    try { await navigator.clipboard.writeText(JSON.stringify(report, null, 2)); setCopied(true); }
+    try { await navigator.clipboard.writeText(JSON.stringify({ ...report, ...(timing.current ? { localAudio: timing.current } : {}) }, null, 2)); setCopied(true); }
     catch { setError('Select and copy the report below.'); }
   };
   return <ConnectionTheme>
-    <audio ref={audio} src={streamUrl} preload="none" style={{ display: 'none' }}
+    <audio ref={audio} src={report?.audioTransport === 'pcm-v1' && supportsLiveAudio() ? undefined : streamUrl} preload="none" style={{ display: 'none' }}
       onError={() => { if (streamUrl) { setError('The audio connection stopped. Retry the server player.'); setOpen(true); } }} />
     <Modal title="Server playback" open={open} onCancel={() => setOpen(false)} footer={null} className="connection-modal" zIndex={11000} focusTriggerAfterClose={false}>
       <div className="connection-content"><ConnectionBrand />
@@ -157,7 +187,7 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
           <Space wrap style={{ marginBottom: 16 }}>
             <button className="connection-button" disabled={busy || !paired} onClick={() => void start()}>{running ? 'Reconnect' : 'Start server player'}</button>
             <button className="connection-button connection-button-secondary" disabled={!streamUrl || busy} onClick={() => {
-              setError(undefined); void audio.current?.play().catch(() => setError('Choose a song, then tap Enable audio again.'));
+              setError(undefined); void (liveAudio.current ? liveAudio.current.play() : audio.current?.play())?.catch(() => setError('Choose a song, then tap Enable audio again.'));
             }}>Enable audio</button>
             <button className="connection-button connection-button-secondary" disabled={busy || !running} onClick={() => void stop()}>Stop</button>
           </Space>
@@ -165,7 +195,7 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
           <button className="connection-button connection-button-secondary" disabled={busy} onClick={() => void stop(true)}>Use browser playback</button>
         </>}
         {report ? <details style={{ marginTop: 18 }}><summary>Diagnostics</summary>
-          <textarea aria-label="Server playback report" readOnly value={JSON.stringify(report, null, 2)} style={{ width: '100%', boxSizing: 'border-box', minHeight: 160, margin: '12px 0', padding: 12, background: '#000', color: '#b3b3b3', border: '1px solid #333', borderRadius: 8, fontSize: 12 }} />
+          <textarea aria-label="Server playback report" readOnly value={JSON.stringify({ ...report, ...(timing.current ? { localAudio: timing.current } : {}) }, null, 2)} style={{ width: '100%', boxSizing: 'border-box', minHeight: 160, margin: '12px 0', padding: 12, background: '#000', color: '#b3b3b3', border: '1px solid #333', borderRadius: 8, fontSize: 12 }} />
           <button className="connection-button connection-button-wide" onClick={() => void copy()}>{copied ? 'Copied' : 'Copy server report'}</button>
         </details> : null}
         {error ? <p className="connection-error" role="alert">{error}</p> : null}

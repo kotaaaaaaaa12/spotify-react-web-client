@@ -12,7 +12,7 @@ import { GridItemComponent } from '../../../../Lists/list';
 import { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { isActiveOnOtherDevice } from '../../../../../store/slices/spotify';
-import useIsMobile from '../../../../../utils/isMobile';
+import useCompactLayout from '../../../../../utils/useCompactLayout';
 import { getLibraryCollapsed, uiActions } from '../../../../../store/slices/ui';
 import { LanguageButton } from '../Language';
 import { LibraryLoginInfo } from './loginInfo';
@@ -70,7 +70,7 @@ const AnonymousContent = () => {
 };
 
 const LoggedContent = memo(() => {
-  const isMobile = useIsMobile();
+  const isMobile = useCompactLayout();
   const dispatch = useAppDispatch();
   const items = useAppSelector(getLibraryItems);
   const collapsed = useAppSelector(getLibraryCollapsed);
