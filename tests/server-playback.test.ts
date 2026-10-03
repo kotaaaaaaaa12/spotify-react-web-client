@@ -60,7 +60,11 @@ describe('Authenticated server playback', () => {
     expect(env.SERVER_PLAYERS.get).toHaveBeenCalledWith(id, { locationHint: 'apac' });
     const internal = stub.fetch.mock.calls[0][0];
     expect(internal.url).toBe('http://container/start');
-    expect(await internal.json()).toEqual({ expectedUsername: 'linked-user', name: `Spotify Cloud Player ${pair.id.slice(0, 8)}` });
+    const input = await internal.json();
+    expect(input).toMatchObject({ engine: 'browser', accessToken: 'private-access', pairingId: pair.id,
+      expectedUsername: 'linked-user', name: `Spotify Cloud Player ${pair.id.slice(0, 8)}` });
+    expect(input.tokenExpiresAt).toBeGreaterThan(Date.now()); expect(input.sessionExpiresAt).toBeGreaterThan(input.tokenExpiresAt);
+    expect(JSON.stringify(input)).not.toMatch(/attacker|private-refresh/);
     expect(internal.headers.has('Cookie')).toBe(false); expect(internal.headers.has('Authorization')).toBe(false);
     const body = await result.json(); expect(body.authentication).toBe('accepted'); expect(body.version).toBe(3);
     expect(JSON.stringify(body)).not.toContain('private-'); expect(result.headers.get('Cache-Control')).toBe('no-store');
@@ -133,6 +137,17 @@ describe('Authenticated server playback', () => {
     const result = await request('/api/server/start', pair.cookie, 'POST');
     expect(result.status).toBe(503); expect(await result.text()).not.toContain('private storage');
     expect(env.SERVER_PLAYERS.get).not.toHaveBeenCalled();
+  });
+  it('redacts unexpected Chrome report values and keeps token refresh routes private', async () => {
+    const pair = await connection(); await request('/api/server/start', pair.cookie, 'POST');
+    containers.get(`spotify-player-v1:${pair.id}`).fetch.mockImplementation(async () => Response.json({ backend: 'cloud-browser', phase: 'private-token',
+      authentication: 'accepted', audio: 'private-token', errorCode: 'private-token', accessToken: 'private-token', deviceId: 'private token',
+      pcmBytes: -1, audioBytes: 'private-token', diagnostics: { revision: 'chrome-diagnostics-1', drm: 'accepted', sdk: 'ready', chromeVersion: 'private-token', events: [{ token: 'private-token' }] } }));
+    const result = await (await request('/api/server/status', pair.cookie)).json();
+    expect(result).toMatchObject({ version: 5, phase: 'failed', errorCode: 'cloud_container_report_invalid', pcmBytes: 0, audioBytes: 0, diagnostics: { drm: 'accepted', sdk: 'ready', events: [] } });
+    expect(JSON.stringify(result)).not.toContain('private-token');
+    expect((await request('/api/pair/player_session', pair.cookie, 'POST')).status).toBe(404);
+    expect((await request('/api/server/token', pair.cookie, 'POST')).status).toBe(404);
   });
   it('forwards only recognized native evidence through the private report route', async () => {
     const pair = await connection(); await request('/api/server/start', pair.cookie, 'POST');

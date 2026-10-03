@@ -16,6 +16,35 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 SERVICE = "_spotify-connect._tcp.local"
 GROUP = "224.0.0.251"
 MAX_BODY = 16384
+REVISION = "android-bridge-diagnostics-1"
+
+
+def startup_failure(stage, error):
+    """Return safe diagnostics without printing a URL, token, or raw exception."""
+    if stage == "private_link":
+        return "invalid_pairing_link", "Use Copy Android pairing link or Copy pairing link. The browser address bar removes the secret."
+    if isinstance(error, urllib.error.HTTPError):
+        messages = {
+            401: "The link expired or was replaced. Create and copy a new Android pairing link.",
+            403: "The cloud site denied access. Check Cloudflare Access or firewall rules.",
+            404: "The cloud pairing endpoint was not found. Check the Worker deployment.",
+            409: "Soloist is not running. Start the server player, then create a new link.",
+            429: "The pairing request limit was reached. Create a new link.",
+            502: "The Worker could not contact Soloist. Copy the site's Server playback report.",
+            503: "Cloud pairing is not ready. Copy the site's Server playback report.",
+        }
+        return "cloud_http_" + str(error.code), messages.get(error.code, "Cloudflare returned an error. Copy the site's Server playback report.")
+    if stage == "cloud_check":
+        if isinstance(error, ValueError):
+            return "cloud_response_invalid", "The response was not a ready Soloist device. Copy the site's Server playback report."
+        return "cloud_network_error", "The cloud site could not be reached. Check this phone's internet connection and the site."
+    if stage == "wifi_address":
+        return "invalid_wifi_address", "Enter this Android phone's private Wi-Fi IPv4 address from Android Wi-Fi settings."
+    if stage == "lan_listener":
+        return "wifi_bind_failed", "The phone could not listen on this address. Check that it belongs to the current Wi-Fi connection."
+    if stage == "mdns_discovery":
+        return "wifi_discovery_failed", "Wi-Fi discovery could not start. Check the Wi-Fi address and temporarily disable a VPN."
+    return "bridge_startup_failed", "Check the site's Server playback report."
 
 
 def parse_link(link):
@@ -247,26 +276,34 @@ def default_address():
 
 def main():
     print("Spotify Cloud Player — Android pairing bridge")
+    print("Bridge revision: " + REVISION)
     print("Soloist and audio playback run in Cloudflare. This tool only relays initial pairing.")
+    stage = "private_link"
+    server = None
     try:
         link = getpass.getpass("Paste the private Android pairing link: ")
         endpoint, token = parse_link(link)
         cloud = Cloud(endpoint, token)
         print("Cloud site: " + urllib.parse.urlsplit(endpoint).netloc)
+        stage = "cloud_check"
+        print("Checking Cloudflare Soloist...")
         info = cloud.request()
         if info.get("status") != 101 or not isinstance(info.get("deviceID"), str) or not isinstance(info.get("remoteName"), str):
             raise ValueError("Soloist is not ready.")
+        stage = "wifi_address"
         default = default_address()
         address = input(f"Android Wi-Fi IPv4 address [{default}]: ").strip() or default
         ip = ipaddress.ip_address(address)
         if ip.version != 4 or not ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_unspecified:
             raise ValueError("A private Wi-Fi IPv4 address is required.")
         paired = threading.Event()
+        stage = "lan_listener"
         server = ThreadingHTTPServer((address, 0), make_handler(cloud, paired))
         server.daemon_threads = True
         identifier = re.sub(r"[^a-z0-9]", "", info["deviceID"].lower())[:16]
         if not identifier:
             raise ValueError("Invalid device identity.")
+        stage = "mdns_discovery"
         advertiser = Advertiser(identifier, address, server.server_port)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -285,9 +322,14 @@ def main():
             server.server_close()
     except KeyboardInterrupt:
         print("Pairing bridge stopped.")
-    except (ValueError, OSError, urllib.error.URLError):
-        print("Pairing could not start. Check the private link, Wi-Fi address, and Cloudflare server report.")
+    except (ValueError, OSError, urllib.error.URLError) as error:
+        code, message = startup_failure(stage, error)
+        print("Pairing could not start [" + code + "]. " + message)
+        print("Diagnostic: " + json.dumps({"revision": REVISION, "stage": stage, "errorCode": code}))
         return 1
+    finally:
+        if server is not None:
+            server.server_close()
     return 0
 
 

@@ -43,6 +43,15 @@ const WebPlayback: FC<WebPlaybackProps> = memo((props) => {
     };
     const initialize = async () => {
       props.onPlayerLoading();
+      // Cloud playback and QR pages must not load Spotify SDK on the receiving
+      // device. Load it only when local browser playback is explicitly active.
+      if (!window.Spotify?.Player && !document.querySelector('script[data-spotify-sdk]')) {
+        window.onSpotifyWebPlaybackSDKReady = () => {};
+        const script = document.createElement('script'); script.dataset.spotifySdk = '1';
+        script.src = 'https://sdk.scdn.co/spotify-player.js'; script.async = true;
+        script.onerror = () => { script.remove(); reportError('Spotify player could not load. Check browser content blockers and reload.', 'sdk_load_failed'); };
+        document.head.appendChild(script);
+      }
       const deadline = Date.now() + BROWSER_PLAYER_TIMEOUT_MS;
       while (!window.Spotify?.Player) {
         if (cancelled) return;

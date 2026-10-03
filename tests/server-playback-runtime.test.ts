@@ -38,7 +38,8 @@ describe('server startup in the Workers runtime', () => {
       const start = () => runtime.dispatchFetch('http://local/api/server/start', { method: 'POST', headers: { Origin: 'http://local', Cookie: `__Host-spotify-pair=${'a'.repeat(32)}.${'b'.repeat(64)}` } });
       const result = await (await start()).json() as any;
       expect(result).toMatchObject({ status: 200, containerCalls: 1, placement: 'apac', input: { expectedUsername: 'expected-runtime-user' }, report: { version: 3, pairing: { code: 'ABC123' } } });
-      expect(result.input).not.toHaveProperty('accessToken'); expect(upstreamCalls).toBe(1);
+      expect(result.input).toMatchObject({ engine: 'browser', accessToken: 'private-runtime-token' });
+      expect(JSON.stringify(result.report)).not.toContain('private-runtime-token'); expect(upstreamCalls).toBe(1);
       for (const [mode, code] of [['redirect', 'server_account_redirect'], ['invalid', 'server_account_request_failed'], ['rejected', 'server_account_rejected']]) {
         upstreamMode = mode;
         const failed = await (await start()).json() as any;

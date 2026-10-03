@@ -73,7 +73,7 @@ const SpotifyContainer: FC<{ children: any }> = memo(({ children }) => {
   const browserChosen = useRef(false);
   const changePlayerMode = useCallback((enabled: boolean, reason?: string) => {
     browserChosen.current = !enabled;
-    if (enabled) localStorage.setItem(SERVER_MODE, '1'); else localStorage.removeItem(SERVER_MODE);
+    localStorage.setItem(SERVER_MODE, enabled ? '1' : '0');
     playerService.setPlaybackDevice(null); dispatch(spotifyActions.setDeviceId({ deviceId: null }));
     dispatch(spotifyActions.setState({ state: null }));
     setFallbackReason(reason); setPlayerError(undefined); setServerEnabled(enabled);
@@ -82,6 +82,12 @@ const SpotifyContainer: FC<{ children: any }> = memo(({ children }) => {
 
   const user = useAppSelector((state) => !!state.auth.user);
   const requesting = useAppSelector((state) => state.auth.requesting);
+  const serverActive = serverEnabled || (user && !browserChosen.current && isServerPlaybackEnabled());
+
+  useEffect(() => {
+    // A completed QR login can happen after this component first mounts.
+    if (user && !browserChosen.current && isServerPlaybackEnabled()) setServerEnabled(true);
+  }, [user]);
 
   useEffect(() => {
     dispatch(initializeSpotifySession());
@@ -131,10 +137,10 @@ const SpotifyContainer: FC<{ children: any }> = memo(({ children }) => {
       action={<Space wrap><Button loading={retryBusy} onClick={() => void retry()}>Retry</Button><PlayerDiagnostics /><Button onClick={() => window.dispatchEvent(new Event(SERVER_DIALOG_EVENT))}>Server playback</Button></Space>}
       style={{ position: 'fixed', top: 8, left: 8, right: 8, zIndex: 10000 }} /></ConnectionTheme> : null}
     {children}
-    {user ? <ServerPlayback enabled={serverEnabled} fallbackReason={fallbackReason} onModeChange={changePlayerMode} /> : null}
+    {user ? <ServerPlayback enabled={serverActive} fallbackReason={fallbackReason} onModeChange={changePlayerMode} /> : null}
   </>;
   if (!user) return <Spinner loading={requesting}>{content}</Spinner>;
-  return <WebPlayback enabled={!serverEnabled} connectionAttempt={playerAttempt} {...webPlaybackSdkProps}>{content}</WebPlayback>;
+  return <WebPlayback enabled={!serverActive} connectionAttempt={playerAttempt} {...webPlaybackSdkProps}>{content}</WebPlayback>;
 });
 
 const RoutesComponent = memo(() => {

@@ -25,6 +25,19 @@ class FakeCloud:
 
 
 class Tests(unittest.TestCase):
+    def test_safe_startup_diagnostics(self):
+        secret = "PRIVATE-TOKEN"
+        for status in (401, 403, 404, 409, 429, 502, 503):
+            error = urllib.error.HTTPError("https://private.example/#" + secret, status, secret, {}, None)
+            code, message = bridge.startup_failure("cloud_check", error)
+            self.assertEqual(code, "cloud_http_" + str(status))
+            self.assertNotIn(secret, message)
+        code, message = bridge.startup_failure("private_link", ValueError(secret))
+        self.assertEqual(code, "invalid_pairing_link")
+        self.assertIn("address bar", message)
+        self.assertNotIn(secret, message)
+        self.assertEqual(bridge.startup_failure("lan_listener", OSError(secret))[0], "wifi_bind_failed")
+
     def test_private_link(self):
         link = "https://music.example/cloud-pair#id=" + "a" * 32 + "&token=" + "b" * 64
         endpoint, token = bridge.parse_link(link)

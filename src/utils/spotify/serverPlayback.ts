@@ -6,14 +6,15 @@ export interface ServerReport {
   version: number;
   phase: string;
   deviceName?: string;
+  deviceId?: string;
   authentication?: string;
   audio?: string;
   pcmBytes?: number;
   audioBytes?: number;
   errorCode?: string | null;
   playerRevision?: string;
-  backend?: 'soloist';
-  authenticationMode?: 'device' | 'zeroconf';
+  backend?: 'soloist' | 'cloud-browser';
+  authenticationMode?: 'device' | 'zeroconf' | 'oauth';
   keyConfigured?: boolean;
   sessionStored?: boolean;
   sessionRestored?: boolean;
@@ -21,7 +22,8 @@ export interface ServerReport {
   discovery?: 'pending' | 'accepted' | 'failed';
   pairing?: { url: string; code: string };
   startup?: { revision: string; stage: string; httpStatus?: number; upstreamStatus?: number };
-  diagnostics?: { revision: string; nativeExit?: { code: number | null; signal: string | null };
+  diagnostics?: { revision: string; drm?: 'pending' | 'accepted' | 'rejected'; sdk?: 'pending' | 'connecting' | 'ready' | 'failed'; chromeVersion?: string;
+    nativeExit?: { code: number | null; signal: string | null };
     encoderExit?: { code: number | null; signal: string | null };
     events: { event: string; errorKind?: string; httpStatus?: number; osErrorCode?: string; reason?: string }[] };
 }
@@ -38,7 +40,7 @@ async function soloistRequest(action: string, input?: object) {
   if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Soloist settings could not be updated.');
   return data;
 }
-export const isServerPlaybackEnabled = () => localStorage.getItem(SERVER_MODE) === '1';
+export const isServerPlaybackEnabled = () => hasPairedPlaybackSession() && localStorage.getItem(SERVER_MODE) !== '0';
 export const hasPairedPlaybackSession = () => !!localStorage.getItem(PAIR_MODE);
 
 export class ServerPlaybackRequestError extends Error {

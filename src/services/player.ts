@@ -15,6 +15,20 @@ let playbackDeviceId: string | null = null;
 // The SDK assigns a NEW device_id on every (re)connect, so a cached id goes stale — matching
 // by name is the reliable way to find the current device.
 let playbackDeviceName: string | null = null;
+let cloudPlaybackState: 'off' | 'starting' | 'ready' | 'failed' = 'off';
+const cloudWaiters = new Set<() => void>();
+const setCloudPlaybackState = (state: typeof cloudPlaybackState) => {
+  cloudPlaybackState = state;
+  if (state !== 'starting') for (const notify of cloudWaiters) notify();
+};
+const waitForCloudPlayback = async () => {
+  if (cloudPlaybackState === 'starting') await new Promise<void>((resolve, reject) => {
+    const finish = () => { clearTimeout(timer); cloudWaiters.delete(finish); resolve(); };
+    const timer = setTimeout(() => { cloudWaiters.delete(finish); reject(new Error('The server player is still starting. Open Server playback to retry.')); }, 120000);
+    cloudWaiters.add(finish);
+  });
+  if (cloudPlaybackState === 'failed') throw new Error('The server player is stopped or unavailable. Open Server playback to retry.');
+};
 
 export const setPlaybackDevice = (deviceId: string | null) => {
   playbackDeviceId = deviceId;
@@ -97,6 +111,10 @@ const startPlayback = async (
   body: { context_uri?: string; uris?: string[]; offset?: { position: number } } = {}
 ) => {
   await activateBrowserAudio();
+  // A song selected during cloud startup waits for its exact SDK device. Never
+  // send that play request to whichever phone happens to be active instead.
+  await waitForCloudPlayback();
+  if (cloudPlaybackState === 'ready') await activateBrowserAudio();
   try {
     await axios.put('/me/player/play', body, { params: deviceParams() });
   } catch (e: any) {
@@ -120,6 +138,7 @@ const playerCommand = async (
   url: string,
   params?: Record<string, string | number | boolean>
 ) => {
+  if (cloudPlaybackState !== 'off' && (cloudPlaybackState !== 'ready' || !currentDeviceId())) return;
   try {
     await axios[method](url, {}, { params: { ...deviceParams(), ...params } });
   } catch (e) {
@@ -196,6 +215,7 @@ const getRecentlyPlayed = async (params: { limit?: number; after?: number; befor
 };
 
 export const playerService = {
+  setCloudPlaybackState,
   addToQueue,
   setPlaybackDevice,
   setPlaybackDeviceName,

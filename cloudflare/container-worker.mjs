@@ -8,7 +8,8 @@ export class SpotifyPlayerContainer extends Container {
   enableInternet = true;
   #operations = Promise.resolve();
   #storage;
-  constructor(ctx, env) { super(ctx, env); this.#storage = ctx.storage; }
+  #env;
+  constructor(ctx, env) { super(ctx, env); this.#storage = ctx.storage; this.#env = env; }
   #serialize(operation) {
     const result = this.#operations.then(operation);
     this.#operations = result.catch(() => {});
@@ -19,6 +20,19 @@ export class SpotifyPlayerContainer extends Container {
     return this.#serialize(async () => {
       if (!this.#storage) return super.fetch(request);
       const action = new URL(request.url).pathname;
+      const browser = await this.#storage.get('browser:config');
+      if (action === '/start') {
+        const input = await request.clone().json();
+        if (input.engine === 'browser') return this.#startBrowser(input, browser);
+      }
+      if (browser) {
+        if (!this.container.running) return Response.json({ version: 5, backend: 'cloud-browser', playerRevision: 'chrome-cloud-1', phase: 'stopped' });
+        if (browser.expiresAt <= Date.now()) { await this.destroy(); this.deleteSchedules('refreshBrowserSession'); return Response.json({ phase: 'stopped' }); }
+        if (request.headers.has('X-Cloud-Access-Token')) await this.#updateBrowserToken({
+          accessToken: request.headers.get('X-Cloud-Access-Token'), tokenExpiresAt: Number(request.headers.get('X-Cloud-Token-Expires')) }, browser);
+        // Do not expose internal authorization headers to the stream handler.
+        return super.fetch(new Request(request.url, { method: request.method }));
+      }
       const config = await this.#storage.get('soloist:config');
       if (!config?.apiKey || config.expiresAt <= Date.now()) return Response.json({ version: 4, backend: 'soloist', playerRevision: 'soloist-cloud-1',
         phase: 'setup_required', authentication: 'pending', audio: 'pending', pcmBytes: 0, audioBytes: 0, keyConfigured: false });
@@ -32,6 +46,45 @@ export class SpotifyPlayerContainer extends Container {
       const response = await super.fetch(request);
       if (action !== '/status' || !response.ok) return response;
       return Response.json({ ...await response.json(), keyConfigured: true, sessionStored: !!await this.#storage.get('soloist:manifest') });
+    });
+  }
+  async #startBrowser(input, old) {
+    if (!/^[a-f0-9]{32}$/.test(input.pairingId || '') || input.name !== `Spotify Cloud Player ${input.pairingId.slice(0, 8)}` ||
+      typeof input.expectedUsername !== 'string' || !input.expectedUsername || input.expectedUsername.length > 128 || /[\r\n\0]/.test(input.expectedUsername) ||
+      !Number.isFinite(input.sessionExpiresAt) || input.sessionExpiresAt <= Date.now()) return Response.json({ error: 'Invalid player configuration.' }, { status: 400 });
+    if (old && (old.pairingId !== input.pairingId || old.expectedUsername !== input.expectedUsername)) return Response.json({ error: 'Account does not match this player.' }, { status: 403 });
+    if (!old && this.container.running) await this.destroy();
+    // OAuth cloud playback replaces the previous native setup completely.
+    await this.#clearState(); await this.#storage.delete('soloist:config');
+    const config = { name: input.name, expectedUsername: input.expectedUsername, pairingId: input.pairingId, expiresAt: input.sessionExpiresAt };
+    await this.#storage.put('browser:config', config); await this.#storage.delete('soloist:bridge');
+    const response = await super.fetch(new Request('http://container/start', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ engine: 'browser', name: input.name, expectedUsername: input.expectedUsername, accessToken: input.accessToken, tokenExpiresAt: input.tokenExpiresAt }) }));
+    if (response.ok) await this.#scheduleRefresh(input.tokenExpiresAt, config.expiresAt);
+    return response;
+  }
+  async #scheduleRefresh(tokenExpiresAt, expiresAt) {
+    // Container's own alarm monitors lifecycle and inactivity. Use its scheduler
+    // so OAuth renewal cannot replace the platform's ten-minute sleep checks.
+    this.deleteSchedules('refreshBrowserSession');
+    await this.schedule(new Date(Math.min(expiresAt, Math.max(Date.now() + 5000, tokenExpiresAt - 60000))), 'refreshBrowserSession');
+  }
+  async #updateBrowserToken(token, config) {
+    const response = await super.fetch(new Request('http://container/token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(token) }));
+    if (!response.ok) throw new Error('Player token update failed.');
+    await this.#scheduleRefresh(token.tokenExpiresAt, config.expiresAt);
+  }
+  refreshBrowserSession() {
+    return this.#serialize(async () => {
+      const config = await this.#storage.get('browser:config');
+      if (!config || !this.container.running) { this.deleteSchedules('refreshBrowserSession'); return; }
+      if (config.expiresAt <= Date.now()) { await this.destroy(); this.deleteSchedules('refreshBrowserSession'); return; }
+      try {
+        const response = await this.#env.PAIR_SESSIONS.get(this.#env.PAIR_SESSIONS.idFromName(config.pairingId)).fetch(new Request('https://internal/player_session', { method: 'POST', body: '{}' }));
+        if (!response.ok) { if ([400, 401, 410].includes(response.status)) { await this.destroy(); this.deleteSchedules('refreshBrowserSession'); return; } throw new Error('Refresh unavailable.'); }
+        const data = await response.json(); if (data.status !== 'ready') { await this.destroy(); this.deleteSchedules('refreshBrowserSession'); return; }
+        await this.#updateBrowserToken({ accessToken: data.access_token, tokenExpiresAt: Date.now() + data.expires_in * 1000 }, config);
+      } catch { this.deleteSchedules('refreshBrowserSession'); await this.schedule(new Date(Math.min(config.expiresAt, Date.now() + 30000)), 'refreshBrowserSession'); }
     });
   }
   async #start(config) {
@@ -131,7 +184,9 @@ export class SpotifyPlayerContainer extends Container {
     // Stopping an unused session must not provision a Container.
     return this.#serialize(async () => {
       if (this.#storage) await this.#storage.delete('soloist:bridge');
+      this.deleteSchedules?.('refreshBrowserSession');
       if (!this.container.running) return;
+      if (await this.#storage?.get('browser:config')) { await super.fetch(new Request('http://container/stop', { method: 'POST' })); await this.destroy(); return; }
       const config = await this.#storage?.get('soloist:config');
       if (config) await this.#seal(config);
       await this.destroy();
@@ -139,7 +194,7 @@ export class SpotifyPlayerContainer extends Container {
   }
   async forgetPlayer() {
     await this.stopPlayer();
-    return this.#serialize(async () => { await this.#clearState(); await this.#storage.delete('soloist:config'); await this.#storage.delete('soloist:bridge'); });
+    return this.#serialize(async () => { await this.#clearState(); await this.#storage.delete('soloist:config'); await this.#storage.delete('soloist:bridge'); await this.#storage.delete('browser:config'); });
   }
   async onActivityExpired() { await this.stopPlayer(); }
 }

@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { PlayerRouter } from './player-router.mjs';
-import { ensureSoloist } from './install-soloist.mjs';
+import { browserPage } from './browser-page.mjs';
 
 export function createPlayerServer(player = new PlayerRouter()) {
   return createServer(async (request, response) => {
@@ -8,6 +8,16 @@ export function createPlayerServer(player = new PlayerRouter()) {
     const json = (data, status = 200) => { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(data)); };
     const path = new URL(request.url, 'http://container').pathname;
     try {
+      if (path.startsWith('/browser-')) {
+        const origin = `http://${request.headers.host}`;
+        const loopback = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(request.socket.remoteAddress);
+        if (!loopback || request.headers.host !== '127.0.0.1:' + request.socket.localPort || request.method !== 'GET' ||
+          (request.headers.origin && request.headers.origin !== origin) || request.headers['sec-fetch-site'] === 'cross-site') return json({ error: 'Forbidden.' }, 403);
+        if (path === '/browser-player') { response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Referrer-Policy': 'no-referrer' }); response.end(browserPage); return; }
+        if (path === '/browser-config') return json({ name: player.name });
+        if (path === '/browser-token') { const token = player.token(); return json(token || { error: 'Token unavailable.' }, token ? 200 : 401); }
+        return json({ error: 'Not found.' }, 404);
+      }
       if (path === '/healthz' && request.method === 'GET') return json({ ok: true });
       if (path === '/status' && request.method === 'GET') return json(player.status());
       if (path === '/zeroconf/getInfo' && request.method === 'GET') return json(await player.getInfo());
@@ -17,7 +27,7 @@ export function createPlayerServer(player = new PlayerRouter()) {
         for await (const chunk of request) { size += chunk.length; if (size > 16384) return json({ error: 'Request is too large.' }, 413); parts.push(chunk); }
         return json(await player.addUser(Buffer.concat(parts).toString()));
       }
-      if (path === '/start' && request.method === 'POST') {
+      if (['/start', '/token'].includes(path) && request.method === 'POST') {
         let size = 0; const parts = [];
         for await (const chunk of request) {
           size += chunk.length;
@@ -26,6 +36,7 @@ export function createPlayerServer(player = new PlayerRouter()) {
         }
         let input;
         try { input = JSON.parse(Buffer.concat(parts).toString()); } catch { return json({ error: 'Invalid request.' }, 400); }
+        if (path === '/token') { player.updateToken(input); return json({ ok: true }); }
         return json(await player.start(input));
       }
       if (path === '/stream' && request.method === 'GET') {
@@ -39,10 +50,6 @@ export function createPlayerServer(player = new PlayerRouter()) {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  // Cold starts update an expired build without requiring a redeploy.
-  try { await ensureSoloist(); }
-  catch { console.error('Soloist update is unavailable; the player will report a startup failure.'); }
-  process.env.PATH = `/tmp/soloist-bin:${process.env.PATH}`;
   const player = new PlayerRouter(); const server = createPlayerServer(player);
   server.listen(8080, '0.0.0.0', () => console.log('Server player is listening on port 8080.'));
   const shutdown = async () => { await player.dispose(); server.close(() => process.exit(0)); };

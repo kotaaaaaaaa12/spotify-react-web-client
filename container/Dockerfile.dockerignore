@@ -12,3 +12,6 @@
 !container/soloist-player.mjs
 !container/install-soloist.mjs
 !container/player-router.mjs
+!container/cloud-browser-player.mjs
+!container/chrome-control.mjs
+!container/browser-page.mjs

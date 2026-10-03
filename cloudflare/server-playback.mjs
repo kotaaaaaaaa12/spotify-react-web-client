@@ -48,14 +48,19 @@ export async function handleServerPlayback(request, env) {
       if (!accountResponse.ok) return startupFailure(stage, 'server_account_rejected', 'Unable to verify the linked Spotify account. Retry the account connection.', 502, accountResponse.status);
       const account = await accountResponse.json();
       if (typeof account.id !== 'string' || !account.id || account.id.length > 128 || /[\r\n\0]/.test(account.id)) return startupFailure(stage, 'server_account_invalid', 'The linked Spotify account could not be verified.', 502);
+      if (account.product && account.product !== 'premium') return startupFailure(stage, 'server_premium_required', 'Server playback requires Spotify Premium.', 403);
       expectedUsername = account.id;
     }
     stage = `container_${action}`;
     const stub = player(env, paired.id);
     const response = await stub.fetch(new Request(`http://container/${action}`, {
       method: request.method,
-      headers: action === 'start' ? { 'Content-Type': 'application/json' } : {},
-      body: action === 'start' ? JSON.stringify({ expectedUsername, name }) : undefined,
+      // These credentials cross only the private Worker/Container boundary.
+      headers: { ...(action === 'start' ? { 'Content-Type': 'application/json' } : {}),
+        'X-Cloud-Access-Token': paired.data.access_token, 'X-Cloud-Token-Expires': String(Date.now() + (paired.data.expires_in || 3600) * 1000) },
+      body: action === 'start' ? JSON.stringify({ engine: 'browser', expectedUsername, name, pairingId: paired.id,
+        sessionExpiresAt: paired.data.sessionExpiresAt, accessToken: paired.data.access_token,
+        tokenExpiresAt: Date.now() + (paired.data.expires_in || 3600) * 1000 }) : undefined,
       signal: request.signal,
     }));
     if (!response.ok) {
@@ -67,17 +72,20 @@ export async function handleServerPlayback(request, env) {
     }
     stage = 'container_report';
     const report = await response.json();
+    if (report.backend === 'cloud-browser') return json(safeBrowserReport(report, name));
     // Return a fixed set of diagnostic fields, never a token or raw process log.
     return json({ phase: report.phase, deviceName: name, authentication: report.authentication, audio: report.audio,
       pcmBytes: report.pcmBytes, audioBytes: report.audioBytes, errorCode: report.errorCode,
-      playerRevision: [PLAYER_REVISION, 'soloist-cloud-1'].includes(report.playerRevision) ? report.playerRevision : undefined,
-      backend: report.backend === 'soloist' ? 'soloist' : undefined,
-      authenticationMode: ['device', 'zeroconf'].includes(report.authenticationMode) ? report.authenticationMode : undefined,
+      playerRevision: [PLAYER_REVISION, 'soloist-cloud-1', 'chrome-cloud-1'].includes(report.playerRevision) ? report.playerRevision : undefined,
+      backend: ['soloist', 'cloud-browser'].includes(report.backend) ? report.backend : undefined,
+      deviceId: report.backend === 'cloud-browser' && /^[a-zA-Z0-9_-]{1,128}$/.test(report.deviceId || '') ? report.deviceId : undefined,
+      authenticationMode: ['device', 'zeroconf', 'oauth'].includes(report.authenticationMode) ? report.authenticationMode : undefined,
       ...(report.backend === 'soloist' ? { keyConfigured: report.keyConfigured === true, sessionStored: report.sessionStored === true,
         sessionRestored: report.sessionRestored === true, pairingRequired: report.pairingRequired === true,
         discovery: ['pending', 'accepted', 'failed'].includes(report.discovery) ? report.discovery : undefined } : {}),
       pairing: report.phase === 'waiting_for_pairing' && report.authentication !== 'accepted' ? safeDevicePairing(report.pairing) : undefined,
-      diagnostics: report.backend === 'soloist' ? safeSoloistDiagnostics(report.diagnostics) : safeDiagnostics(report.diagnostics), version: report.backend === 'soloist' ? 4 : 3 });
+      diagnostics: report.backend === 'cloud-browser' ? safeBrowserDiagnostics(report.diagnostics) : report.backend === 'soloist' ? safeSoloistDiagnostics(report.diagnostics) : safeDiagnostics(report.diagnostics),
+      version: report.backend === 'cloud-browser' ? 5 : report.backend === 'soloist' ? 4 : 3 });
   } catch {
     const failures = {
       session: ['server_session_unavailable', 'Unable to read the QR session. Retry the account connection.'],
@@ -88,6 +96,32 @@ export async function handleServerPlayback(request, env) {
     const [code, message] = failures[stage] || ['server_container_request_failed', 'Unable to contact the Container. Check Container deployment and capacity, then retry.'];
     return startupFailure(stage, code, message);
   }
+}
+
+function safeBrowserReport(report, deviceName) {
+  const errorCodes = ['cloud_drm_unavailable', 'cloud_sdk_timeout', 'cloud_authentication_error', 'cloud_device_offline',
+    'cloud_drm_initialization_failed', 'cloud_premium_required', 'cloud_playback_error', 'cloud_autoplay_failed',
+    'cloud_sdk_connection_failed', 'cloud_sdk_load_failed', 'cloud_page_initialization_failed', 'cloud_browser_start_failed',
+    'cloud_browser_control_failed', 'cloud_browser_unavailable', 'cloud_browser_exited', 'cloud_audio_server_unavailable',
+    'cloud_audio_server_exited', 'cloud_audio_capture_unavailable', 'cloud_audio_capture_exited', 'encoder_unavailable',
+    'encoder_exited', 'encoder_input_closed'];
+  const bytes = value => Number.isSafeInteger(value) && value >= 0 ? value : 0;
+  return { version: 5, backend: 'cloud-browser', playerRevision: 'chrome-cloud-1', authenticationMode: 'oauth', deviceName,
+    phase: ['idle', 'starting', 'waiting_for_playback', 'streaming', 'failed', 'stopped'].includes(report.phase) ? report.phase : 'failed',
+    authentication: ['pending', 'accepted', 'rejected'].includes(report.authentication) ? report.authentication : 'pending',
+    audio: ['pending', 'encoding', 'received', 'failed'].includes(report.audio) ? report.audio : 'pending',
+    pcmBytes: bytes(report.pcmBytes), audioBytes: bytes(report.audioBytes),
+    errorCode: report.errorCode == null ? null : errorCodes.includes(report.errorCode) ? report.errorCode : 'cloud_container_report_invalid',
+    deviceId: /^[a-zA-Z0-9_-]{1,128}$/.test(report.deviceId || '') ? report.deviceId : undefined,
+    diagnostics: safeBrowserDiagnostics(report.diagnostics) };
+}
+
+function safeBrowserDiagnostics(value) {
+  if (value?.revision !== 'chrome-diagnostics-1') return undefined;
+  return { revision: 'chrome-diagnostics-1', events: [],
+    drm: ['pending', 'accepted', 'rejected'].includes(value.drm) ? value.drm : undefined,
+    sdk: ['pending', 'connecting', 'ready', 'failed'].includes(value.sdk) ? value.sdk : undefined,
+    chromeVersion: /^Chrome\/\d+(?:\.\d+){0,3}$/.test(value.chromeVersion || '') ? value.chromeVersion : undefined };
 }
 
 function safeSoloistDiagnostics(value) {

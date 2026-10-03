@@ -261,8 +261,11 @@ export class PairingSession {
       await this.save(session);
       return json({ ok: true });
     }
-    if (!['session', 'refresh', 'logout'].includes(action)) return json({ error: 'Not found.' }, 404);
-    if (session.ownerHash !== await digest(input.secret || '')) return json({ error: 'Unauthorized session.' }, 401);
+    if (!['session', 'refresh', 'logout', 'player_session'].includes(action)) return json({ error: 'Not found.' }, 404);
+    // player_session is accessible only through the private DO binding. The
+    // public handler's explicit method table above never exposes this action.
+    // It lets the owned Container alarm refresh while Safari is backgrounded.
+    if (action !== 'player_session' && session.ownerHash !== await digest(input.secret || '')) return json({ error: 'Unauthorized session.' }, 401);
     if (action === 'logout') { await this.ctx.storage.deleteAll(); return json({ ok: true }); }
     if (session.status === 'failed') return json({ error: 'Spotify connection failed. Start a new connection.' }, 400);
     if (session.status !== 'ready') return json({ status: 'pending', code: session.code, expiresAt: session.expiresAt });
