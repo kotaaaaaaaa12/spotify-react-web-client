@@ -49,6 +49,18 @@ describe('Cloud browser audio and credential lifecycle', () => {
     await player.stop(); expect(player.token()).toBeNull(); expect(client.end).toHaveBeenCalledOnce();
     encoder.stdout.write(Buffer.from([255, 251])); expect(player.status().audioBytes).toBe(3);
   });
+  it('relays only this SDK track and clears its playback state on stop', async () => {
+    const { player, config, setReport } = await fixture(); await player.start(config);
+    setReport({ drm: 'accepted', sdk: 'ready', deviceId: 'cloud-device', playback: {
+      paused: false, position: 12000, duration: 180000, accessToken: 'private-oauth',
+      track_window: { current_track: { id: 'track1', uri: 'spotify:track:track1', name: 'Current song',
+        artists: [{ name: 'Artist', uri: 'spotify:artist:artist1' }], album: { images: [] } } },
+    } });
+    await vi.waitFor(() => expect(player.status().playback?.position).toBe(12000), { timeout: 2000 });
+    expect(player.status().playback.track_window.current_track.name).toBe('Current song');
+    expect(JSON.stringify(player.status())).not.toContain('private-oauth');
+    await player.stop(); expect(player.status().playback).toBeNull();
+  });
   it('reports a DRM failure distinctly and stops all processes without emitting credentials or raw errors', async () => {
     const { player, config, processes, setReport } = await fixture(); await player.start(config);
     setReport({ drm: 'rejected', sdk: 'failed', errorCode: 'cloud_drm_unavailable', message: 'private-oauth' });

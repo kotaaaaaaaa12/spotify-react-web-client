@@ -5,7 +5,7 @@ import { ListIcon, Pause, Play } from '../../../Icons';
 
 // Redux
 import { playerService } from '../../../../services/player';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getImageAnalysis2 } from '../../../../utils/imageAnyliser';
 import { uiActions } from '../../../../store/slices/ui';
 import tinycolor from 'tinycolor2';
@@ -16,6 +16,7 @@ const PlayButton = () => {
   const paused = useAppSelector((state) => state.spotify.state?.paused);
   return (
     <button
+      aria-label={paused ? 'Resume playback' : 'Pause playback'}
       onClick={() => (!paused ? playerService.pausePlayback() : playerService.startPlayback())}
     >
       {paused ? <Play /> : <Pause />}
@@ -41,18 +42,25 @@ const NowPlayingBarMobile = () => {
     (a, b) => a?.id === b?.id
   );
   const liked = useAppSelector((state) => state.spotify.liked);
-  const [currentColor, setColor] = useState('blue');
+  const [currentColor, setColor] = useState('#282828');
+  const [seekPreview, setSeekPreview] = useState<number | null>(null);
+  const seeking = useRef(false);
+  const seekDisabled = useAppSelector(state => !!state.spotify.state?.disallows.seeking);
+  const commitSeek = (value: string) => {
+    seeking.current = false; setSeekPreview(null);
+    if (!seekDisabled) void playerService.seekToPosition(Number(value)).catch(() => {});
+  };
 
   useEffect(() => {
-    if (currentSong) {
-      getImageAnalysis2(currentSong.album.images[0].url).then((r) => {
-        let color = tinycolor(r);
-        while (color.isLight()) {
-          color = color.darken(10);
-        }
-        setColor(color.toHexString());
-      });
-    }
+    let cancelled = false; setColor('#282828');
+    const cover = currentSong?.album.images[0]?.url;
+    if (cover) void getImageAnalysis2(cover).then(r => {
+      let color = tinycolor(r);
+      while (color.isLight()) color = color.darken(10);
+      if (!cancelled) setColor(color.toHexString());
+    }).catch(() => {});
+    seeking.current = false; setSeekPreview(null);
+    return () => { cancelled = true; };
   }, [currentSong]);
 
   if (!currentSong) return <div></div>;
@@ -60,11 +68,11 @@ const NowPlayingBarMobile = () => {
   return (
     <div>
       <div
-        className='mobile-player'
+        className='mobile-player' role='region' aria-label='Now playing'
         style={{ background: `linear-gradient(${currentColor} -50%, rgb(18, 18, 18) 300%)` }}
       >
-        <Row justify='space-between'>
-          <Col>
+        <Row justify='space-between' wrap={false} align='middle'>
+          <Col className='mini-player-details'>
             <SongDetails isMobile />
           </Col>
           <Col style={{ display: 'flex' }}>
@@ -91,14 +99,15 @@ const NowPlayingBarMobile = () => {
             </div>
           </Col>
         </Row>
-        <div className='time-line'>
-          <div
-            className='current-time'
-            style={{
-              width: `${(position / duration) * 100}%`,
-            }}
-          ></div>
-        </div>
+        <input type='range' className='mini-player-seek' aria-label='Seek' min={0} max={duration} step={1000}
+          disabled={seekDisabled} value={seekPreview ?? Math.min(position, duration)}
+          style={{ background: `linear-gradient(to right, white ${(Math.min(seekPreview ?? position, duration) / duration) * 100}%, #ffffff40 0%)` }}
+          onPointerDown={event => { seeking.current = true; event.currentTarget.setPointerCapture(event.pointerId); }}
+          onChange={event => setSeekPreview(Number(event.currentTarget.value))}
+          onPointerUp={event => commitSeek(event.currentTarget.value)}
+          onPointerCancel={() => { seeking.current = false; setSeekPreview(null); }}
+          onKeyUp={event => { if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) commitSeek(event.currentTarget.value); }}
+          onBlur={event => { if (seeking.current) commitSeek(event.currentTarget.value); }} />
       </div>
     </div>
   );

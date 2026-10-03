@@ -37,8 +37,8 @@ export const setState = createAsyncThunk<
     const playing = !spotifyState.paused;
     const song = spotifyState.track_window.current_track;
     document.title =
-      song && playing ? `${song.name} • ${song.artists[0].name}` : 'Spotify Web Player';
-    if (currentSong) dispatch(fetchLikedSong(currentSong.id!));
+      song && playing ? [song.name, song.artists[0]?.name].filter(Boolean).join(' • ') : 'Spotify Web Player';
+    if (currentSong?.id) dispatch(fetchLikedSong(currentSong.id!));
   }
   return spotifyState;
 });

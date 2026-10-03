@@ -5,6 +5,7 @@ export const SERVER_DIALOG_EVENT = 'spotify-open-server-player';
 export interface ServerReport {
   version: number;
   phase: string;
+  playback?: Spotify.PlaybackState | null;
   deviceName?: string;
   deviceId?: string;
   authentication?: string;

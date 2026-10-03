@@ -138,6 +138,23 @@ describe('Authenticated server playback', () => {
     expect(result.status).toBe(503); expect(await result.text()).not.toContain('private storage');
     expect(env.SERVER_PLAYERS.get).not.toHaveBeenCalled();
   });
+  it('relays SDK metadata without a Web API playback read and removes arbitrary snapshot fields', async () => {
+    const pair = await connection(); await request('/api/server/start', pair.cookie, 'POST');
+    const stub = containers.get(`spotify-player-v1:${pair.id}`);
+    const playback = { paused: false, position: 8000, duration: 180000, accessToken: 'private-access',
+      context: { uri: 'spotify:album:album1', metadata: { refreshToken: 'private-refresh' } },
+      track_window: { current_track: { name: 'SDK song', id: 'track1', uri: 'spotify:track:track1', artists: [],
+        album: { images: [{ url: 'https://i.scdn.co/image/cover' }, { url: 'https://evil.example/private-refresh' }] },
+        arbitrary: 'private-refresh' } } };
+    stub.fetch.mockImplementation(async () => Response.json({ ...report, backend: 'cloud-browser', deviceId: 'cloud-device', playback }));
+    const body = await (await request('/api/server/status', pair.cookie)).json();
+    expect(body.playback).toMatchObject({ position: 8000, paused: false, track_window: { current_track: { name: 'SDK song', artists: [], album: { images: [{ url: 'https://i.scdn.co/image/cover' }] } } } });
+    expect(JSON.stringify(body)).not.toMatch(/private-access|private-refresh|evil.example/);
+    stub.fetch.mockImplementation(async () => Response.json({ ...report, backend: 'cloud-browser', playback: null }));
+    expect((await (await request('/api/server/status', pair.cookie)).json()).playback).toBeNull();
+    stub.fetch.mockImplementation(async () => Response.json({ ...report, backend: 'cloud-browser', phase: 'failed', playback }));
+    expect((await (await request('/api/server/status', pair.cookie)).json()).playback).toBeNull();
+  });
   it('redacts unexpected Chrome report values and keeps token refresh routes private', async () => {
     const pair = await connection(); await request('/api/server/start', pair.cookie, 'POST');
     containers.get(`spotify-player-v1:${pair.id}`).fetch.mockImplementation(async () => Response.json({ backend: 'cloud-browser', phase: 'private-token',

@@ -33,10 +33,10 @@ config.main = 'cloudflare/container-worker.mjs';
 config.containers ||= [];
 const container = config.containers.find(item => item.class_name === serverBinding.class_name);
 const settings = { class_name: serverBinding.class_name, image: './container/Dockerfile', image_build_context: '.',
-  instance_type: 'basic', max_instances: 2, constraints: { regions: ['APAC'] } };
+  instance_type: 'standard-1', max_instances: 2, constraints: { regions: ['APAC'] } };
 if (container) Object.assign(container, settings);
 else config.containers.push(settings);
 if (JSON.stringify(config) !== original) {
   writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);
-  console.log('Configured QR connections and APAC server playback (basic). Existing Spotify variables, routes, and Worker name were preserved.');
+  console.log('Configured QR connections and APAC server playback (standard-1). Existing Spotify variables, routes, and Worker name were preserved.');
 }

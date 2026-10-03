@@ -15,3 +15,4 @@
 !container/cloud-browser-player.mjs
 !container/chrome-control.mjs
 !container/browser-page.mjs
+!container/playback-state.mjs

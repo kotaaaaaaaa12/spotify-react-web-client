@@ -23,10 +23,23 @@ describe('Automatic pairing configuration', () => {
       expect(output.migrations).toHaveLength(3);
       expect(output.main).toBe('cloudflare/container-worker.mjs');
       expect(output.containers).toEqual([...existing.containers, { class_name: 'SpotifyPlayerContainer', image: './container/Dockerfile',
-        image_build_context: '.', instance_type: 'basic', max_instances: 2, constraints: { regions: ['APAC'] } }]);
+        image_build_context: '.', instance_type: 'standard-1', max_instances: 2, constraints: { regions: ['APAC'] } }]);
       const first = readFileSync(join(dir, 'wrangler.jsonc'), 'utf8');
       execFileSync(process.execPath, [installer], { cwd: dir });
       expect(readFileSync(join(dir, 'wrangler.jsonc'), 'utf8')).toBe(first);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+  it('upgrades an existing basic player to standard-1 without losing its custom variables or another Container', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'spotify-upgrade-'));
+    try {
+      const other = { class_name: 'Other', image: 'example/other', instance_type: 'lite', max_instances: 1 };
+      writeFileSync(join(dir, 'wrangler.jsonc'), JSON.stringify({ name: 'keep-name', vars: { SPOTIFY_CLIENT_ID: 'a'.repeat(32) },
+        containers: [other, { class_name: 'SpotifyPlayerContainer', image: './container/Dockerfile', instance_type: 'basic', max_instances: 2 }] }));
+      execFileSync(process.execPath, [installer], { cwd: dir });
+      const result = JSON.parse(readFileSync(join(dir, 'wrangler.jsonc'), 'utf8'));
+      expect(result.containers[0]).toEqual(other);
+      expect(result.containers[1]).toMatchObject({ instance_type: 'standard-1', max_instances: 2, constraints: { regions: ['APAC'] } });
+      expect(result.name).toBe('keep-name'); expect(result.vars.SPOTIFY_CLIENT_ID).toBe('a'.repeat(32));
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
   it('does not overwrite an unrelated binding with the same name', () => {

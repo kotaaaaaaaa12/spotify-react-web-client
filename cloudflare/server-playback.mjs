@@ -1,3 +1,4 @@
+import { safePlaybackState } from '../container/playback-state.mjs';
 import { getPairedSession } from './pairing.mjs';
 import { safeDiagnostics } from '../container/diagnostics.mjs';
 import { PLAYER_REVISION, safeDevicePairing } from '../container/device-auth.mjs';
@@ -113,6 +114,7 @@ function safeBrowserReport(report, deviceName) {
     pcmBytes: bytes(report.pcmBytes), audioBytes: bytes(report.audioBytes),
     errorCode: report.errorCode == null ? null : errorCodes.includes(report.errorCode) ? report.errorCode : 'cloud_container_report_invalid',
     deviceId: /^[a-zA-Z0-9_-]{1,128}$/.test(report.deviceId || '') ? report.deviceId : undefined,
+    ...(Object.hasOwn(report, 'playback') ? { playback: report.authentication === 'accepted' && ['streaming', 'waiting_for_playback'].includes(report.phase) ? safePlaybackState(report.playback) : null } : {}),
     diagnostics: safeBrowserDiagnostics(report.diagnostics) };
 }
 

@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Transform } from 'node:stream';
+import { safePlaybackState } from './playback-state.mjs';
 import { ChromeControl } from './chrome-control.mjs';
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -23,12 +24,12 @@ export class CloudBrowserPlayer {
   }
   reset() {
     this.phase = 'idle'; this.authentication = 'pending'; this.audio = 'pending'; this.errorCode = null;
-    this.deviceId = null; this.drm = 'pending'; this.sdk = 'pending'; this.chromeVersion = undefined;
+    this.playback = null; this.deviceId = null; this.drm = 'pending'; this.sdk = 'pending'; this.chromeVersion = undefined;
     this.pcmBytes = 0; this.audioBytes = 0; this.soundReceived = false;
   }
   status() {
     return { version: 5, backend: 'cloud-browser', playerRevision: 'chrome-cloud-1', authenticationMode: 'oauth',
-      phase: this.phase, authentication: this.authentication, audio: this.audio, deviceId: this.deviceId,
+      phase: this.phase, authentication: this.authentication, audio: this.audio, deviceId: this.deviceId, playback: this.playback,
       pcmBytes: this.pcmBytes, audioBytes: this.audioBytes, errorCode: this.errorCode,
       diagnostics: { revision: 'chrome-diagnostics-1', drm: this.drm, sdk: this.sdk, chromeVersion: this.chromeVersion, events: [] } };
   }
@@ -46,7 +47,7 @@ export class CloudBrowserPlayer {
     if (['failed', 'stopped'].includes(this.phase)) return;
     this.errorCode = code; this.phase = 'failed'; this.audio = 'failed';
     if (code === 'cloud_authentication_error' || code === 'cloud_premium_required') this.authentication = 'rejected';
-    this.accessToken = null; this.closeClients(); this.control?.close();
+    this.playback = null; this.accessToken = null; this.closeClients(); this.control?.close();
     for (const child of [this.chrome, this.capture, this.encoder, this.pulse]) child?.kill('SIGTERM');
   }
   start(input) {
@@ -117,6 +118,7 @@ export class CloudBrowserPlayer {
         if (report?.errorCode) { this.fail(errors.has(report.errorCode) ? report.errorCode : 'cloud_sdk_connection_failed'); break; }
         if (report?.sdk === 'ready' && /^[a-zA-Z0-9_-]{1,128}$/.test(report.deviceId || '') && this.drm === 'accepted') {
           this.deviceId = report.deviceId; this.authentication = 'accepted';
+          this.playback = safePlaybackState(report.playback);
           if (this.phase === 'starting') this.phase = 'waiting_for_playback';
           if (!activated) { activated = true; await control.activate(); }
         }
@@ -131,7 +133,7 @@ export class CloudBrowserPlayer {
   }
   closeClients() { for (const client of this.clients) client.end(); this.clients.clear(); }
   async stopInternal() {
-    ++this.generation; this.phase = 'stopped'; this.accessToken = null; this.tokenExpiresAt = 0;
+    ++this.generation; this.phase = 'stopped'; this.playback = null; this.accessToken = null; this.tokenExpiresAt = 0;
     this.closeClients(); this.control?.close(); this.control = null;
     await Promise.all([this.chrome, this.capture, this.encoder, this.pulse].map(endProcess));
     this.chrome = this.capture = this.encoder = this.pulse = null;

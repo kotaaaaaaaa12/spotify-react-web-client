@@ -64,7 +64,7 @@ const SongDetails: FC<{ isMobile?: boolean }> = memo((props) => {
             <img
               alt='Album Cover'
               className='album-cover'
-              src={current_track?.album.images[0].url}
+              src={current_track?.album.images[0]?.url || '/images/playlist.png'}
             />
             <button
               aria-label='Now playing view'

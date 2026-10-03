@@ -39,8 +39,14 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
   const [streamUrl, setStreamUrl] = useState<string>(); const [copied, setCopied] = useState(false);
   const audio = useRef<HTMLAudioElement>(null); const operation = useRef(false);
   const alive = useRef(true); const polling = useRef(false); const epoch = useRef(0);
+  const playback = useRef<{ state: Spotify.PlaybackState; receivedAt: number } | null>(null);
   const paired = hasPairedPlaybackSession();
+  const updatePlayback = useCallback((state: Spotify.PlaybackState | null) => {
+    playback.current = state ? { state, receivedAt: Date.now() } : null;
+    dispatch(spotifyActions.setState({ state }));
+  }, [dispatch]);
   const clearDevice = useCallback(() => {
+    playback.current = null;
     setStreamUrl(undefined); setDeviceId(undefined); setServerAudio(null);
     playerService.setPlaybackDevice(null); playerService.setPlaybackDeviceName(null);
     dispatch(spotifyActions.setDeviceId({ deviceId: null })); dispatch(spotifyActions.setState({ state: null }));
@@ -70,8 +76,21 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
       playerService.setPlaybackDeviceName(result.deviceName || null);
       dispatch(spotifyActions.setDeviceId({ deviceId: result.deviceId })); dispatch(spotifyActions.setActiveDevice({ activeDevice: result.deviceId }));
       setStreamUrl(current => current || `/api/server/stream?t=${Date.now()}`);
+      // SDK state belongs to this exact Container. A Web API read can lag or
+      // return no active device even while its audio is already playing.
+      if (Object.prototype.hasOwnProperty.call(result, 'playback')) updatePlayback(result.playback || null);
     }
-  }, [clearDevice, dispatch]);
+  }, [clearDevice, dispatch, updatePlayback]);
+  useEffect(() => {
+    if (!enabled || !running) return;
+    const timer = setInterval(() => {
+      const snapshot = playback.current;
+      if (!snapshot || snapshot.state.paused) return;
+      dispatch(spotifyActions.setState({ state: { ...snapshot.state,
+        position: Math.min(snapshot.state.duration, snapshot.state.position + Math.max(0, Date.now() - snapshot.receivedAt)) } }));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [enabled, running, dispatch]);
   useEffect(() => {
     if (!enabled || !running) return; let cancelled = false;
     const check = async () => {
@@ -79,9 +98,9 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
       try {
         const result = await serverRequest('status'); if (cancelled || currentEpoch !== epoch.current) return;
         acceptReport(result);
-        if (result.authentication === 'accepted' && result.deviceId) {
+        if (result.authentication === 'accepted' && result.deviceId && !Object.prototype.hasOwnProperty.call(result, 'playback')) {
           const state = await playerService.fetchPlaybackState().catch(() => undefined); if (cancelled || currentEpoch !== epoch.current) return;
-          if (state !== undefined) dispatch(spotifyActions.setState({ state: serverPlaybackState(state, result.deviceId) }));
+          if (state !== undefined) updatePlayback(serverPlaybackState(state, result.deviceId));
         }
       } catch (e) {
         if (!cancelled && currentEpoch === epoch.current) {
@@ -92,9 +111,9 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
         }
       } finally { polling.current = false; }
     };
-    void check(); const timer = setInterval(() => void check(), 5000);
+    void check(); const timer = setInterval(() => void check(), 2000);
     return () => { cancelled = true; clearInterval(timer); };
-  }, [enabled, running, dispatch, acceptReport, clearDevice]);
+  }, [enabled, running, updatePlayback, acceptReport, clearDevice]);
   const start = useCallback(async () => {
     if (operation.current) return; operation.current = true; ++epoch.current;
     playerService.setCloudPlaybackState('starting');
