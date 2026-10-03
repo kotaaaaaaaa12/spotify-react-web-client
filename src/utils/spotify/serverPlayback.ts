@@ -14,6 +14,7 @@ export interface ServerReport {
   playerRevision?: string;
   authenticationMode?: 'device';
   pairing?: { url: string; code: string };
+  startup?: { revision: string; stage: string; httpStatus?: number; upstreamStatus?: number };
   diagnostics?: { revision: string; nativeExit?: { code: number | null; signal: string | null };
     encoderExit?: { code: number | null; signal: string | null };
     events: { event: string; errorKind?: string; httpStatus?: number; osErrorCode?: string; reason?: string }[] };
@@ -21,14 +22,32 @@ export interface ServerReport {
 export const isServerPlaybackEnabled = () => localStorage.getItem(SERVER_MODE) === '1';
 export const hasPairedPlaybackSession = () => !!localStorage.getItem(PAIR_MODE);
 
+export class ServerPlaybackRequestError extends Error {
+  constructor(message: string, public report: ServerReport) { super(message); this.name = 'ServerPlaybackRequestError'; }
+}
+
 export async function serverRequest(action: 'start' | 'status' | 'stop'): Promise<ServerReport> {
   const response = await fetch(`/api/server/${action}`, {
     method: action === 'status' ? 'GET' : 'POST', credentials: 'same-origin', cache: 'no-store',
     headers: action === 'status' ? {} : { 'X-Spotify-Device': '1' },
   });
   let data;
-  try { data = await response.json(); } catch { throw new Error('The server player returned an unexpected response. Redeploy the latest update.'); }
-  if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : `Server playback request failed (HTTP ${response.status}).`);
+  try { data = await response.json(); } catch {
+    throw new ServerPlaybackRequestError('The server player returned an unexpected response. Redeploy the latest update.', {
+      version: 3, phase: 'failed', errorCode: 'server_invalid_response', startup: { revision: 'browser-response-1', stage: 'browser_response', httpStatus: response.status },
+    });
+  }
+  if (!response.ok) {
+    const stages = ['session', 'account', 'container_binding', 'container_start', 'container_status', 'container_stream', 'container_stop', 'container_report'];
+    const startup = data.startup;
+    const report: ServerReport = { version: 3, phase: 'failed', errorCode: typeof data.errorCode === 'string' && /^server_[a-z_]{1,64}$/.test(data.errorCode) ? data.errorCode : 'server_http_error',
+      startup: startup?.revision === 'server-startup-1' && stages.includes(startup.stage) ? {
+        revision: 'server-startup-1', stage: startup.stage, httpStatus: response.status,
+        ...(Number.isInteger(startup.upstreamStatus) && startup.upstreamStatus >= 100 && startup.upstreamStatus <= 599 ? { upstreamStatus: startup.upstreamStatus } : {}),
+      } : { revision: 'browser-response-1', stage: 'browser_response', httpStatus: response.status },
+    };
+    throw new ServerPlaybackRequestError(typeof data.error === 'string' ? data.error : `Server playback request failed (HTTP ${response.status}).`, report);
+  }
   return data;
 }
 

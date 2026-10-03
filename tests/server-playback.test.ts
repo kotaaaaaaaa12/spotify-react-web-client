@@ -84,6 +84,20 @@ describe('Authenticated server playback', () => {
     expect((await request('/api/server/start', pair.cookie, 'POST')).status).toBe(502);
     expect(env.SERVER_PLAYERS.get).not.toHaveBeenCalled();
   });
+  it('distinguishes account and Container exceptions without logging their private contents', async () => {
+    const pair = await connection(); const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      vi.mocked(fetch).mockImplementation(async () => { throw Error('private-account-token'); });
+      const account = await (await request('/api/server/start', pair.cookie, 'POST')).json();
+      expect(account).toMatchObject({ errorCode: 'server_account_request_failed', startup: { revision: 'server-startup-1', stage: 'account', httpStatus: 503 } });
+      expect(env.SERVER_PLAYERS.get).not.toHaveBeenCalled();
+      vi.mocked(fetch).mockImplementation(async () => Response.json({ id: 'linked-user' }));
+      env.SERVER_PLAYERS.get.mockImplementation(() => { throw Error('private-container-id'); });
+      const container = await (await request('/api/server/start', pair.cookie, 'POST')).json();
+      expect(container).toMatchObject({ errorCode: 'server_container_request_failed', startup: { stage: 'container_start' } });
+      expect(JSON.stringify(log.mock.calls)).not.toMatch(/private-account-token|private-container-id/);
+    } finally { log.mockRestore(); }
+  });
   it('checks mutation origin and methods before consulting account sessions', async () => {
     const pair = await connection();
     expect((await request('/api/server/start', pair.cookie, 'POST', { Origin: 'https://evil.example.com' })).status).toBe(403);

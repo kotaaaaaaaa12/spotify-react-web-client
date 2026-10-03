@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Modal, QRCode, Space } from 'antd';
 import { ConnectionBrand, ConnectionTheme } from './ConnectionTheme';
-import { hasPairedPlaybackSession, SERVER_DIALOG_EVENT, ServerReport, serverPlaybackState, serverRequest } from '../../utils/spotify/serverPlayback';
+import { hasPairedPlaybackSession, SERVER_DIALOG_EVENT, ServerReport, ServerPlaybackRequestError, serverPlaybackState, serverRequest } from '../../utils/spotify/serverPlayback';
 import { setServerAudio } from '../../utils/spotify/browserAudio';
 import { playerService } from '../../services/player';
 import { useAppDispatch } from '../../store/store';
@@ -74,6 +74,7 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
         }
       } catch (e) {
         if (!cancelled) {
+          if (e instanceof ServerPlaybackRequestError) setReport(e.report);
           setError(e instanceof Error ? e.message : 'Unable to check the server player.'); setRunning(false); setStreamUrl(undefined); setServerAudio(null); setOpen(true);
           setDeviceId(undefined); playerService.setPlaybackDevice(null);
           dispatch(spotifyActions.setDeviceId({ deviceId: null })); dispatch(spotifyActions.setState({ state: null }));
@@ -91,7 +92,11 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
       playerService.setPlaybackDevice(null); playerService.setPlaybackDeviceName(result.deviceName || null);
       setDeviceId(undefined); setReport(result); setRunning(true);
       setStreamUrl(result.authentication === 'accepted' ? `/api/server/stream?t=${Date.now()}` : undefined);
-    } catch (e) { if (alive.current) setError(e instanceof Error ? e.message : 'Unable to start the server player.'); }
+    } catch (e) { if (alive.current) {
+      if (e instanceof ServerPlaybackRequestError) setReport(e.report);
+      setError(e instanceof Error ? e.message : 'Unable to start the server player.');
+      setOpen(true);
+    } }
     finally { operation.current = false; if (alive.current) setBusy(false); }
   }, []);
   useEffect(() => {
@@ -110,7 +115,7 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
       dispatch(spotifyActions.setDeviceId({ deviceId: null })); dispatch(spotifyActions.setState({ state: null }));
       setReport({ version: 1, phase: 'stopped' });
       if (disable) onModeChange(false);
-    } catch (e) { setError(e instanceof Error ? e.message : 'Unable to stop the server player.'); }
+    } catch (e) { if (e instanceof ServerPlaybackRequestError) setReport(e.report); setError(e instanceof Error ? e.message : 'Unable to stop the server player.'); }
     finally { operation.current = false; setBusy(false); }
   };
   const enableAudio = () => {
