@@ -32,6 +32,13 @@ export const browserPage = `<!doctype html><html><meta charset="utf-8"><title>Cl
           }).catch(() => fail('cloud_authentication_error'));
         }
       });
+      window.__cloudPlayerCommand = async ({ action, value }) => {
+        const methods = { pause: 'pause', resume: 'resume', next: 'nextTrack', previous: 'previousTrack', seek: 'seek', volume: 'setVolume' };
+        if (!methods[action]) throw new Error('Invalid control.');
+        await player[methods[action]](...(['seek', 'volume'].includes(action) ? [value] : []));
+        report.playback = playbackState(await player.getCurrentState());
+        return report.playback;
+      };
       player.addListener('ready', ({ device_id }) => { if (report.errorCode) return; clearTimeout(timeout); report.sdk = 'ready'; report.deviceId = device_id; });
       player.addListener('player_state_changed', state => { report.playback = playbackState(state); });
       let readingState = false;
@@ -41,7 +48,7 @@ export const browserPage = `<!doctype html><html><meta charset="utf-8"><title>Cl
         try { report.playback = playbackState(await player.getCurrentState()); }
         catch { /* Keep the last snapshot during a temporary SDK read failure. */ }
         finally { readingState = false; }
-      }, 1000);
+      }, 250);
       player.addListener('not_ready', () => fail('cloud_device_offline'));
       player.addListener('initialization_error', () => fail('cloud_drm_initialization_failed'));
       player.addListener('authentication_error', () => fail('cloud_authentication_error'));

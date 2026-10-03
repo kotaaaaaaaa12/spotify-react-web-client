@@ -14,11 +14,12 @@ describe('Cloud Chrome across Workers RPC and durable storage', () => {
         async alarm(){if(this.callback)await this[this.callback]();}
         async fetch(request){const path=new URL(request.url).pathname;
           if(path==='/start'){this.launch=await request.json();this.latestToken=this.launch.accessToken;this.launches++;this.container.running=true;this.phase='waiting_for_playback';return Response.json(this.report());}
+          if(path==='/control'){this.command=await request.json();this.controlHeaders={contentType:request.headers.get('Content-Type'),privateToken:request.headers.has('X-Cloud-Access-Token'),cookie:request.headers.has('Cookie')};return Response.json(this.report());}
           if(path==='/token'){this.latestToken=(await request.json()).accessToken;return Response.json({ok:true});}
           if(path==='/stop'){this.phase='stopped';return Response.json({checkpoint:null});}
           return Response.json(this.report());
         }
-        async testInspect(){return {latestToken:this.latestToken,launch:this.launch,launches:this.launches,records:[...await this.ctx.storage.list()]};}
+        async testInspect(){return {command:this.command,controlHeaders:this.controlHeaders,latestToken:this.latestToken,launch:this.launch,launches:this.launches,records:[...await this.ctx.storage.list()]};}
         async testScheduleAlarm(){await this.ctx.storage.setAlarm(Date.now()+100);}
         report(){return {backend:'cloud-browser',phase:this.phase,authentication:'accepted',audio:'pending',deviceId:'registered-cloud-device',authenticationMode:'oauth',playerRevision:'chrome-cloud-1',pcmBytes:0,audioBytes:0,
           accessToken:this.latestToken,diagnostics:{revision:'chrome-diagnostics-1',drm:'accepted',sdk:'ready',chromeVersion:'Chrome/140.0.0.0',token:this.latestToken,events:[]}};}
@@ -65,6 +66,12 @@ describe('Cloud Chrome across Workers RPC and durable storage', () => {
       expect(before.launch).toMatchObject({ engine: 'browser', accessToken: 'private-account-token-1', expectedUsername: 'linked-user' });
       expect(JSON.stringify(before.records)).not.toMatch(/private-|attacker/);
       expect(before.launch).not.toHaveProperty('refreshToken');
+      const control = await runtime.dispatchFetch(origin + '/api/server/control', { method: 'POST',
+        headers: { Cookie: cookie, Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'pause', arbitrary: 'drop-this' }) });
+      expect(control.status).toBe(200);
+      const controlled = await stub.testInspect();
+      expect(controlled.command).toEqual({ action: 'pause' });
+      expect(controlled.controlHeaders).toEqual({ contentType: 'application/json', privateToken: false, cookie: false });
       // Real DO alarm dispatch uses the private session operation, without a browser poll.
       await new Promise(resolve => setTimeout(resolve, 1150)); await stub.testScheduleAlarm();
       let rotated: any;

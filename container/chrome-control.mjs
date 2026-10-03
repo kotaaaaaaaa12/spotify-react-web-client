@@ -57,6 +57,15 @@ export class ChromeControl {
   activate() {
     return this.send('Runtime.evaluate', { expression: 'window.__activateCloudPlayer?.()', userGesture: true, awaitPromise: true }, this.sessionId);
   }
+  async command(action, value) {
+    if (!['pause', 'resume', 'next', 'previous', 'seek', 'volume'].includes(action) ||
+      (action === 'seek' && (!Number.isInteger(value) || value < 0 || value > 86400000)) ||
+      (action === 'volume' && (!Number.isFinite(value) || value < 0 || value > 1))) throw new Error('Invalid control.');
+    const result = await this.send('Runtime.evaluate', { expression: `window.__cloudPlayerCommand(${JSON.stringify({ action, value })})`,
+      userGesture: true, awaitPromise: true, returnByValue: true }, this.sessionId);
+    if (result.exceptionDetails) throw new Error('Player control failed.');
+    return result.result?.value;
+  }
   close() {
     if (this.closed) return; this.closed = true;
     for (const task of this.pending.values()) { clearTimeout(task.timer); task.reject(new Error('Chrome connection closed.')); }

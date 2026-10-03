@@ -155,6 +155,25 @@ describe('Authenticated server playback', () => {
     stub.fetch.mockImplementation(async () => Response.json({ ...report, backend: 'cloud-browser', phase: 'failed', playback }));
     expect((await (await request('/api/server/status', pair.cookie)).json()).playback).toBeNull();
   });
+  it('authenticates PCM and validates SDK controls before forwarding a small private command', async () => {
+    expect((await request('/api/server/pcm')).status).toBe(401);
+    const pair = await connection(); await request('/api/server/start', pair.cookie, 'POST');
+    const stub = containers.get(`spotify-player-v1:${pair.id}`); stub.fetch.mockClear();
+    const command = (body: any, extra: Record<string, string> = {}) => worker.fetch(new Request(origin + '/api/server/control', {
+      method: 'POST', headers: { Cookie: pair.cookie, Origin: origin, 'Content-Type': 'application/json', ...extra }, body: JSON.stringify(body),
+    }), env);
+    expect((await command({ action: 'seek', value: -1 })).status).toBe(400);
+    expect((await command({ action: 'evaluate', value: 'private-access' })).status).toBe(400);
+    expect((await command({ action: 'pause' }, { Origin: 'https://evil.example' })).status).toBe(403);
+    expect(stub.fetch).not.toHaveBeenCalled();
+    stub.fetch.mockImplementation(async () => Response.json({ ...report, backend: 'cloud-browser', controls: 'sdk-v1', audioTransport: 'pcm-v1', audioEpoch: 4 }));
+    const result = await (await command({ action: 'pause', arbitrary: 'private-extra' })).json();
+    expect(result).toMatchObject({ controls: 'sdk-v1', audioTransport: 'pcm-v1', audioEpoch: 4 });
+    expect(await stub.fetch.mock.calls[0][0].json()).toEqual({ action: 'pause' });
+    stub.fetch.mockImplementation(async () => new Response(new Uint8Array([1, 2]), { headers: { 'Set-Cookie': 'private-cookie' } }));
+    const pcm = await request('/api/server/pcm', pair.cookie); expect(pcm.headers.get('Content-Type')).toBe('application/x-spotify-pcm');
+    expect(pcm.headers.has('Set-Cookie')).toBe(false); expect([...new Uint8Array(await pcm.arrayBuffer())]).toEqual([1, 2]);
+  });
   it('redacts unexpected Chrome report values and keeps token refresh routes private', async () => {
     const pair = await connection(); await request('/api/server/start', pair.cookie, 'POST');
     containers.get(`spotify-player-v1:${pair.id}`).fetch.mockImplementation(async () => Response.json({ backend: 'cloud-browser', phase: 'private-token',

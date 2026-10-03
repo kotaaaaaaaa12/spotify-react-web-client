@@ -16,3 +16,4 @@
 !container/chrome-control.mjs
 !container/browser-page.mjs
 !container/playback-state.mjs
+!container/audio-wire.mjs

@@ -27,7 +27,7 @@ export function createPlayerServer(player = new PlayerRouter()) {
         for await (const chunk of request) { size += chunk.length; if (size > 16384) return json({ error: 'Request is too large.' }, 413); parts.push(chunk); }
         return json(await player.addUser(Buffer.concat(parts).toString()));
       }
-      if (['/start', '/token'].includes(path) && request.method === 'POST') {
+      if (['/start', '/token', '/control'].includes(path) && request.method === 'POST') {
         let size = 0; const parts = [];
         for await (const chunk of request) {
           size += chunk.length;
@@ -36,8 +36,13 @@ export function createPlayerServer(player = new PlayerRouter()) {
         }
         let input;
         try { input = JSON.parse(Buffer.concat(parts).toString()); } catch { return json({ error: 'Invalid request.' }, 400); }
+        if (path === '/control') return json(await player.command(input));
         if (path === '/token') { player.updateToken(input); return json({ ok: true }); }
         return json(await player.start(input));
+      }
+      if (path === '/pcm' && request.method === 'GET') {
+        if (!player.attachPcm(response)) return json({ error: 'Live audio unavailable.' }, 409);
+        response.writeHead(200, { 'Content-Type': 'application/x-spotify-pcm', 'X-Accel-Buffering': 'no' }); response.flushHeaders(); return;
       }
       if (path === '/stream' && request.method === 'GET') {
         if (!player.attach(response)) return json({ error: 'Start the server player before enabling audio.' }, 409);

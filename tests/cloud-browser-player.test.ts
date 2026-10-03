@@ -17,7 +17,7 @@ function child() {
 }
 async function fixture() {
   const processes = new Map<string, any>(); let browserReport: any = { drm: 'pending', sdk: 'pending' };
-  const control = { open: vi.fn(async () => {}), report: vi.fn(async () => browserReport), activate: vi.fn(async () => {}), close: vi.fn(), version: 'Chrome/140.0.0.0' };
+  const control = { command: vi.fn(async () => browserReport.playback), open: vi.fn(async () => {}), report: vi.fn(async () => browserReport), activate: vi.fn(async () => {}), close: vi.fn(), version: 'Chrome/140.0.0.0' };
   const spawnProcess = vi.fn((command: string) => { const process = child(); processes.set(command, process); return process; });
   const root = await mkdtemp(join(tmpdir(), 'spotify-chrome-test-'));
   const player = new CloudBrowserPlayer({ root, spawnProcess, fileStat: async () => ({}), connectChrome: async () => control }); players.push(player);
@@ -60,6 +60,25 @@ describe('Cloud browser audio and credential lifecycle', () => {
     expect(player.status().playback.track_window.current_track.name).toBe('Current song');
     expect(JSON.stringify(player.status())).not.toContain('private-oauth');
     await player.stop(); expect(player.status().playback).toBeNull();
+  });
+  it('frames PCM with the matching SDK track, invalidates old audio on controls, and rejects slow clients', async () => {
+    const { player, config, setReport, processes, control } = await fixture(); await player.start(config);
+    const playback = { paused: false, position: 1000, duration: 180000, track_window: { current_track: { name: 'PCM song', uri: 'spotify:track:track', id: 'track', artists: [], album: { images: [] } } } };
+    setReport({ drm: 'accepted', sdk: 'ready', deviceId: 'cloud-device', playback });
+    await vi.waitFor(() => expect(player.status().playback?.position).toBe(1000));
+    const chunks: Uint8Array[] = [];
+    const client = Object.assign(new EventEmitter(), { write: (chunk: Uint8Array) => chunks.push(chunk), end: vi.fn(), destroy: vi.fn(), writableLength: 0 });
+    expect(player.attachPcm(client)).toBe(true); processes.get('parec').stdout.write(Buffer.from([1, 2, 3, 4]));
+    const frames: any[] = []; const { AudioFrameReader } = await import('../container/audio-wire.mjs'); const reader = new AudioFrameReader();
+    for (const chunk of chunks) reader.push(chunk, (type: number, bytes: Uint8Array) => frames.push({ type, bytes }));
+    expect(JSON.parse(new TextDecoder().decode(frames[0].bytes)).state.track_window.current_track.name).toBe('PCM song');
+    expect([...frames[1].bytes.slice(4)]).toEqual([1, 2, 3, 4]);
+    control.command.mockResolvedValueOnce({ ...playback, paused: true });
+    await player.command({ action: 'pause' }); expect(control.command).toHaveBeenCalledWith('pause', undefined); expect(player.status().audioEpoch).toBe(1);
+    await expect(player.command({ action: 'seek', value: -1 })).rejects.toThrow('Invalid control');
+    chunks.splice(0); const bytesBeforePause = player.status().liveAudioBytes; processes.get('parec').stdout.write(Buffer.from([1, 2, 3, 4]));
+    expect(chunks.every(chunk => chunk[0] === 0)).toBe(true); expect(player.status().liveAudioBytes).toBe(bytesBeforePause);
+    client.writableLength = 150000; processes.get('parec').stdout.write(Buffer.from([1, 2, 3, 4])); expect(client.destroy).toHaveBeenCalledOnce();
   });
   it('reports a DRM failure distinctly and stops all processes without emitting credentials or raw errors', async () => {
     const { player, config, processes, setReport } = await fixture(); await player.start(config);

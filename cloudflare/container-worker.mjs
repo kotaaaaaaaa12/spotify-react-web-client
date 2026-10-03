@@ -31,7 +31,7 @@ export class SpotifyPlayerContainer extends Container {
         if (request.headers.has('X-Cloud-Access-Token')) await this.#updateBrowserToken({
           accessToken: request.headers.get('X-Cloud-Access-Token'), tokenExpiresAt: Number(request.headers.get('X-Cloud-Token-Expires')) }, browser);
         // Do not expose internal authorization headers to the stream handler.
-        return super.fetch(new Request(request.url, { method: request.method }));
+        return super.fetch(new Request(request.url, { method: request.method, ...(action === '/control' ? { headers: { 'Content-Type': 'application/json' }, body: request.body, duplex: 'half' } : {}) }));
       }
       const config = await this.#storage.get('soloist:config');
       if (!config?.apiKey || config.expiresAt <= Date.now()) return Response.json({ version: 4, backend: 'soloist', playerRevision: 'soloist-cloud-1',

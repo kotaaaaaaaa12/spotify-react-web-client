@@ -21,7 +21,7 @@ export async function stopServerPlayer(env, id) {
 export async function handleServerPlayback(request, env) {
   const url = new URL(request.url);
   const action = url.pathname.slice('/api/server/'.length);
-  const methods = { start: 'POST', status: 'GET', stream: 'GET', stop: 'POST' };
+  const methods = { start: 'POST', status: 'GET', stream: 'GET', pcm: 'GET', control: 'POST', stop: 'POST' };
   if (!methods[action]) return json({ error: 'Not found.' }, 404);
   if (request.method !== methods[action]) return json({ error: 'Method not allowed.' }, 405);
   if (request.method === 'POST') {
@@ -38,6 +38,20 @@ export async function handleServerPlayback(request, env) {
     if (!env.SERVER_PLAYERS) return startupFailure('container_binding', 'server_binding_unavailable', 'Server playback is unavailable. Apply the Container update and redeploy.');
     if (action === 'stop') { stage = 'container_stop'; await stopServerPlayer(env, paired.id); return json({ version: 1, phase: 'stopped' }); }
     const name = `Spotify Cloud Player ${paired.id.slice(0, 8)}`;
+    let control;
+    if (action === 'control') {
+      if (Number(request.headers.get('Content-Length')) > 1024) return json({ error: 'Invalid control.' }, 400);
+      const reader = request.body?.getReader(); const chunks = []; let size = 0;
+      if (reader) while (true) { const chunk = await reader.read(); if (chunk.done) break; size += chunk.value.byteLength;
+        if (size > 1024) { await reader.cancel(); return json({ error: 'Invalid control.' }, 413); } chunks.push(chunk.value); }
+      const bytes = new Uint8Array(size); let offset = 0; for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+      const text = new TextDecoder().decode(bytes);
+      try { control = JSON.parse(text); } catch { return json({ error: 'Invalid control.' }, 400); }
+      if (!['pause', 'resume', 'next', 'previous', 'seek', 'volume', 'flush'].includes(control?.action) ||
+        (control.action === 'seek' && (!Number.isInteger(control.value) || control.value < 0 || control.value > 86400000)) ||
+        (control.action === 'volume' && (!Number.isFinite(control.value) || control.value < 0 || control.value > 1))) return json({ error: 'Invalid control.' }, 400);
+      control = { action: control.action, ...(['seek', 'volume'].includes(control.action) ? { value: control.value } : {}) };
+    }
     let expectedUsername;
     if (action === 'start') {
       stage = 'account';
@@ -57,19 +71,19 @@ export async function handleServerPlayback(request, env) {
     const response = await stub.fetch(new Request(`http://container/${action}`, {
       method: request.method,
       // These credentials cross only the private Worker/Container boundary.
-      headers: { ...(action === 'start' ? { 'Content-Type': 'application/json' } : {}),
+      headers: { ...(['start', 'control'].includes(action) ? { 'Content-Type': 'application/json' } : {}),
         'X-Cloud-Access-Token': paired.data.access_token, 'X-Cloud-Token-Expires': String(Date.now() + (paired.data.expires_in || 3600) * 1000) },
       body: action === 'start' ? JSON.stringify({ engine: 'browser', expectedUsername, name, pairingId: paired.id,
         sessionExpiresAt: paired.data.sessionExpiresAt, accessToken: paired.data.access_token,
-        tokenExpiresAt: Date.now() + (paired.data.expires_in || 3600) * 1000 }) : undefined,
+        tokenExpiresAt: Date.now() + (paired.data.expires_in || 3600) * 1000 }) : control ? JSON.stringify(control) : undefined,
       signal: request.signal,
     }));
     if (!response.ok) {
       // Platform errors and raw process logs must never reach the browser.
       return startupFailure(stage, response.status === 429 ? 'server_container_capacity' : 'server_container_response_failed', response.status === 429 ? 'Container capacity is temporarily limited. Try again shortly.' : 'The server player could not start or respond. Check deployment status and retry.', response.status === 429 ? 429 : 502, response.status);
     }
-    if (action === 'stream') {
-      return new Response(response.body, { headers: { ...headers, 'Content-Type': 'audio/mpeg', 'Accept-Ranges': 'none' } });
+    if (action === 'stream' || action === 'pcm') {
+      return new Response(response.body, { headers: { ...headers, 'Cache-Control': action === 'pcm' ? 'no-store, no-transform' : 'no-store', 'Content-Type': action === 'pcm' ? 'application/x-spotify-pcm' : 'audio/mpeg', 'Accept-Ranges': 'none', 'X-Accel-Buffering': 'no' } });
     }
     stage = 'container_report';
     const report = await response.json();
@@ -111,7 +125,9 @@ function safeBrowserReport(report, deviceName) {
     phase: ['idle', 'starting', 'waiting_for_playback', 'streaming', 'failed', 'stopped'].includes(report.phase) ? report.phase : 'failed',
     authentication: ['pending', 'accepted', 'rejected'].includes(report.authentication) ? report.authentication : 'pending',
     audio: ['pending', 'encoding', 'received', 'failed'].includes(report.audio) ? report.audio : 'pending',
-    pcmBytes: bytes(report.pcmBytes), audioBytes: bytes(report.audioBytes),
+    audioTransport: report.audioTransport === 'pcm-v1' ? 'pcm-v1' : undefined, controls: report.controls === 'sdk-v1' ? 'sdk-v1' : undefined,
+    audioEpoch: Number.isSafeInteger(report.audioEpoch) && report.audioEpoch >= 0 && report.audioEpoch <= 0xffffffff ? report.audioEpoch : undefined,
+    liveAudioBytes: bytes(report.liveAudioBytes), pcmBytes: bytes(report.pcmBytes), audioBytes: bytes(report.audioBytes),
     errorCode: report.errorCode == null ? null : errorCodes.includes(report.errorCode) ? report.errorCode : 'cloud_container_report_invalid',
     deviceId: /^[a-zA-Z0-9_-]{1,128}$/.test(report.deviceId || '') ? report.deviceId : undefined,
     ...(Object.hasOwn(report, 'playback') ? { playback: report.authentication === 'accepted' && ['streaming', 'waiting_for_playback'].includes(report.phase) ? safePlaybackState(report.playback) : null } : {}),
