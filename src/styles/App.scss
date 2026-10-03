@@ -110,7 +110,7 @@ h3 {
   --home-section-padding: 20px;
   padding: var(--home-section-padding);
   height: 100%;
-  min-height: 400px;
+  min-height: 0;
   border-radius: $container-border-radius;
 
   &--podcasts {

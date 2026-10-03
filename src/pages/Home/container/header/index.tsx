@@ -1,7 +1,6 @@
 import { Space } from 'antd';
 import { FC, memo, RefObject } from 'react';
 import Chip from '../../../../components/Chip';
-import { PageHeader } from '../../../../components/Layout/components/Header';
 import { PodcastSegmentedNav } from './PodcastSegmentedNav';
 
 // Utils
@@ -60,20 +59,15 @@ const ChipsSection = memo(() => {
 export const HomeHeader: FC<HomeHeaderProps> = (props) => {
   const user = useAppSelector((state) => state.auth.user);
 
-  const { container, sectionContainer, color } = props;
+  const { color } = props;
 
   if (!user) {
     return null;
   }
 
   return (
-    <PageHeader
-      color={color}
-      activeHeider={20}
-      container={container}
-      sectionContainer={sectionContainer}
-    >
+    <div className='home-header' style={{ backgroundColor: color }}>
       <ChipsSection />
-    </PageHeader>
+    </div>
   );
 };

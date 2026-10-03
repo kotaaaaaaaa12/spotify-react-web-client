@@ -1,7 +1,6 @@
 import { memo, useEffect, type FC, type ReactElement } from 'react';
 
 // Components
-import { Col, Row } from 'antd';
 import { Navbar } from './components/Navbar';
 import { Library } from './components/Library';
 import PlayingBar from './components/PlayingBar';
@@ -37,9 +36,9 @@ export const AppLayout: FC<{ children: ReactElement }> = memo((props) => {
   const showDetails = rightLayoutOpen && hasState && !isTablet;
 
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
-    id: 'persistence',
+    id: isMobile ? 'persistence-phone' : isTablet ? 'persistence-touch' : 'persistence',
     storage: localStorage,
-    panelIds: showDetails ? ['left', 'center', 'details-section'] : ['left', 'center'],
+    panelIds: isMobile ? ['center'] : showDetails ? ['left', 'center', 'details-section'] : ['left', 'center'],
   });
 
   useEffect(() => {
@@ -69,35 +68,25 @@ export const AppLayout: FC<{ children: ReactElement }> = memo((props) => {
 
       {/* Main Component */}
       <div className='main-container'>
-        <Row
-          wrap
+        <div
           className='app-shell-grid'
-          justify='end'
-          gutter={[8, 8]}
           style={{
             overflow: 'hidden',
-            height: `calc(100dvh - ${
-              activeOnOtherDevice ? '141' : !user && isMobile ? '0' : '105'
-            }px)`,
+            height: `calc(100dvh - ${user ? (isMobile ? (hasState ? 164 : 74) : isTablet ? (hasState ? 105 : 14) : 105) + (activeOnOtherDevice ? 36 : 0) : 70}px - env(safe-area-inset-bottom, 0px))`,
           }}
         >
-          <Col span={24}>
+          <div className='app-shell-header'>
             <Navbar />
-          </Col>
+          </div>
 
-          <Col
-            span={24}
-            style={{
-              maxHeight: activeOnOtherDevice ? `calc(100vh - 185px)` : undefined,
-            }}
-          >
+          <div className='app-shell-content'>
             <Group
               orientation='horizontal'
               defaultLayout={defaultLayout}
               onLayoutChanged={onLayoutChanged}
               style={{ height: '100%', width: '100%' }}
             >
-              <Panel
+              {!isMobile ? <Panel
                 id='left'
                 className='mobile-hidden'
                 groupResizeBehavior={libraryCollapsed ? 'preserve-pixel-size' : 'preserve-relative-size'}
@@ -105,7 +94,7 @@ export const AppLayout: FC<{ children: ReactElement }> = memo((props) => {
                 style={{ borderRadius: 5 }}
               >
                 <Library />
-              </Panel>
+              </Panel> : null}
 
               {!isMobile ? <Separator className='resize-handler' /> : null}
 
@@ -129,8 +118,8 @@ export const AppLayout: FC<{ children: ReactElement }> = memo((props) => {
                 </>
               ) : null}
             </Group>
-          </Col>
-        </Row>
+          </div>
+        </div>
       </div>
 
       {<footer>{user ? <PlayingBar /> : <LoginFooter />}</footer>}

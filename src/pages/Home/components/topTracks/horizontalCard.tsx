@@ -7,7 +7,7 @@ import { useAppSelector } from '../../../../store/store';
 
 // Utils
 import tinycolor from 'tinycolor2';
-import useIsMobile from '../../../../utils/isMobile';
+import useCompactLayout from '../../../../utils/useCompactLayout';
 import { getImageAnalysis2 } from '../../../../utils/imageAnyliser';
 
 // Interfaces
@@ -31,21 +31,25 @@ export const HorizontalCard: FC<HorizontalCardProps> = memo(({ item, setColor })
   const isCurrent = currentSong === item.id;
   const imageUrl = item.album?.images?.[0]?.url || PLAYLIST_DEFAULT_IMAGE;
 
-  const isMobile = useIsMobile();
+  const isMobile = useCompactLayout();
 
   const onClick = useCallback(() => {
-    if (isCurrent) return;
-    playerService.startPlayback({ uris: [item.uri] });
-  }, [isCurrent, item.uri]);
+    const request = isCurrent ? (isPlaying ? playerService.pausePlayback() : playerService.startPlayback()) : playerService.startPlayback({ uris: [item.uri] });
+    void request.catch(() => {});
+  }, [isCurrent, isPlaying, item.uri]);
 
   useEffect(() => {
-    if (imageUrl) getImageAnalysis2(imageUrl).then();
+    if (imageUrl) void getImageAnalysis2(imageUrl).catch(() => {});
   }, [imageUrl]);
 
   return (
     <TrackActionsWrapper track={item} trigger={['contextMenu']}>
       <div
         className='horizontal-playlist'
+        role={isMobile ? 'button' : undefined}
+        tabIndex={isMobile ? 0 : undefined}
+        aria-label={isMobile ? `Play ${item.name}` : undefined}
+        onKeyDown={event => { if (isMobile && ['Enter', ' '].includes(event.key)) { event.preventDefault(); onClick(); } }}
         onClick={isMobile ? onClick : undefined}
         onDoubleClick={isMobile ? undefined : onClick}
         onMouseEnter={
@@ -57,7 +61,7 @@ export const HorizontalCard: FC<HorizontalCardProps> = memo(({ item, setColor })
                     color = color.darken(10);
                   }
                   setColor(color.toHexString());
-                });
+                }).catch(() => {});
               }
             : undefined
         }

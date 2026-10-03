@@ -71,7 +71,7 @@ const DetailsContainer: FC<{ children: ReactNode | ReactNode[] }> = memo((props)
   );
 
   const contextDetails = useMemo(() => {
-    const [_, type, id] = context?.uri!.split(':') || [];
+    const [_, type, id] = context?.uri?.split(':') || [];
     // @ts-ignore
     const name = context?.metadata?.context_description || song.name;
     if (type === 'playlist') {

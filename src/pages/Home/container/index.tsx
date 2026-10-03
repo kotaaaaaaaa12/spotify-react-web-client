@@ -6,7 +6,6 @@ import { HomePodcastSection } from './sections/PodcastSection';
 
 // Utils
 import { FC, memo, RefObject, useRef, useState } from 'react';
-import useIsMobile from '../../../utils/isMobile';
 
 // Store
 import { useAppSelector } from '../../../store/store';
@@ -21,7 +20,6 @@ const HomePageContainer: FC<HomePageContainerProps> = memo((props) => {
   const { container } = props;
   const [color, setColor] = useState('rgb(66, 32, 35)');
 
-  const isMobile = useIsMobile();
   const sectionContainerRef = useRef<HTMLDivElement>(null);
   const user = useAppSelector((state) => !!state.auth.user);
   const section = useAppSelector((state) => state.home.section);
@@ -34,8 +32,6 @@ const HomePageContainer: FC<HomePageContainerProps> = memo((props) => {
       <div
         className={`Home-seccion${section === 'PODCAST' ? ' Home-seccion--podcasts' : ''}`}
         style={{
-          // Keep first-section spacing even when TopTracks (or other lead blocks) don't render
-          paddingTop: section === 'PODCAST' ? (isMobile ? 50 : 0) : 70,
           transition: section === 'PODCAST' ? undefined : 'background 5s',
           background: `linear-gradient(180deg, ${pageColor} 2%, rgb(18, 18, 18) 11%)`,
         }}

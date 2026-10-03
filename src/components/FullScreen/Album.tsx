@@ -13,7 +13,7 @@ const AlbumSongDetails = memo(() => {
 
   return (
     <div className='flex flex-row items-center'>
-      <img alt='Album Cover' className='album-cover' src={`${currentSong?.album.images[0].url}`} />
+      <img alt='Album Cover' className='album-cover' src={currentSong?.album.images?.[0]?.url || '/images/playlist.png'} />
       <div id='song-and-artist-name'>
         <p className='text-white font-bold song-title' title={currentSong?.name}>
           {currentSong?.name}
