@@ -93,7 +93,7 @@ const Card = memo((props: CardShortProps) => {
 const ArtistCardShort = memo(({ artist }: { artist: Artist }) => {
   const navigate = useNavigate();
   const filter = useAppSelector((state) => state.yourLibrary.filter);
-  const contextUri = useAppSelector((state) => state.spotify.state?.context.uri);
+  const contextUri = useAppSelector((state) => state.spotify.state?.context?.uri);
 
   const onClick = useCallback(() => {
     navigate(`/artist/${artist.id}`);
@@ -121,7 +121,7 @@ const AlbumCardShort = memo(({ album }: { album: Album }) => {
   const dispatch = useAppDispatch();
   const userId = useAppSelector((state) => state.auth.user?.id);
   const filter = useAppSelector((state) => state.yourLibrary.filter);
-  const contextUri = useAppSelector((state) => state.spotify.state?.context.uri);
+  const contextUri = useAppSelector((state) => state.spotify.state?.context?.uri);
 
   const onClick = useCallback(() => {
     if (!userId) {
@@ -151,7 +151,7 @@ const PlaylistCardShort = memo(({ playlist }: { playlist: Playlist }) => {
   const navigate = useNavigate();
 
   const filter = useAppSelector((state) => state.yourLibrary.filter);
-  const contextUri = useAppSelector((state) => state.spotify.state?.context.uri);
+  const contextUri = useAppSelector((state) => state.spotify.state?.context?.uri);
 
   const onClick = useCallback(() => {
     navigate(`/playlist/${playlist.id}`);

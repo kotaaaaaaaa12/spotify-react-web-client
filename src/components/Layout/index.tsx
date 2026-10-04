@@ -1,4 +1,4 @@
-import { memo, useEffect, type FC, type ReactElement } from 'react';
+import { memo, useEffect, useRef, type FC, type ReactElement } from 'react';
 
 // Components
 import { Navbar } from './components/Navbar';
@@ -19,12 +19,15 @@ import { LoginFooter } from './components/LoginFooter';
 import { LoginModal } from '../Modals/LoginModal';
 import useCompactLayout from '../../utils/useCompactLayout';
 import useIsMobile from '../../utils/isMobile';
+import { yourLibraryActions } from '../../store/slices/yourLibrary';
 
 const pct = (value: number) => `${value}%`;
 
 export const AppLayout: FC<{ children: ReactElement }> = memo((props) => {
   const dispatch = useAppDispatch();
   const user = useAppSelector((state) => !!state.auth.user);
+  const userId = useAppSelector((state) => state.auth.user?.id);
+  const libraryLoadedFor = useRef<string | undefined>(undefined);
   const rightLayoutOpen = useAppSelector(isRightLayoutOpen);
   const libraryCollapsed = useAppSelector(getLibraryCollapsed);
   const hasState = useAppSelector((state) => !!state.spotify.state);
@@ -48,6 +51,15 @@ export const AppLayout: FC<{ children: ReactElement }> = memo((props) => {
   useEffect(() => {
     if (user) dispatch(spotifyActions.fetchDevices());
   }, [user, dispatch]);
+
+  useEffect(() => {
+    if (!userId) { libraryLoadedFor.current = undefined; return; }
+    if (libraryLoadedFor.current === userId) return;
+    libraryLoadedFor.current = userId;
+    dispatch(yourLibraryActions.fetchMyAlbums());
+    dispatch(yourLibraryActions.fetchMyArtists());
+    dispatch(yourLibraryActions.fetchMyPlaylists());
+  }, [userId, dispatch]);
 
   // In v4, Panel `style` applies to an inner wrapper — min/max width there no longer
   // constrains the flex item, so unused outer width shows up as a gap. Use size props instead.

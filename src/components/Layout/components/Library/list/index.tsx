@@ -1,5 +1,5 @@
 // Components
-import { Col } from 'antd';
+import { Spin } from 'antd';
 import { LibraryTitle } from '../Title';
 import { ListItemComponent } from './ListCards';
 import { CompactItemComponent } from './CompactCards';
@@ -9,58 +9,30 @@ import { LibraryFilters, SearchArea } from '../Filters';
 import { useAppDispatch, useAppSelector } from '../../../../../store/store';
 import { getLibraryItems } from '../../../../../store/slices/yourLibrary';
 import { GridItemComponent } from '../../../../Lists/list';
-import { memo, useMemo } from 'react';
+import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { isActiveOnOtherDevice } from '../../../../../store/slices/spotify';
 import useCompactLayout from '../../../../../utils/useCompactLayout';
 import { getLibraryCollapsed, uiActions } from '../../../../../store/slices/ui';
 import { LanguageButton } from '../Language';
 import { LibraryLoginInfo } from './loginInfo';
 
-const COLLAPSED_STYLE = {
-  overflowY: 'scroll',
-  height: '100%',
-} as const;
-
-const YourLibrary = () => {
+const YourLibrary = ({ embedded = false }: { embedded?: boolean }) => {
   const collapsed = useAppSelector(getLibraryCollapsed);
   const user = useAppSelector((state) => !!state.auth.user);
-  const activeOnOtherDevice = useAppSelector(isActiveOnOtherDevice);
-
-  const heightValue = useMemo(() => {
-    let value = 275;
-    if (!user) value = 270;
-    if (collapsed) value = 270;
-    if (activeOnOtherDevice) value += 50;
-    return value;
-  }, [user, collapsed, activeOnOtherDevice]);
 
   return (
-    <div className={`Navigation-section library ${!collapsed ? 'open' : ''}`}>
-      <LibraryTitle />
-
-      {!collapsed && user ? <LibraryFilters /> : null}
-
-      <div className='library-list-container'>
-        <Col style={collapsed ? {} : COLLAPSED_STYLE}>
-          <div
-            className='library-list'
-            style={{
-              overflowY: 'scroll',
-              overflowX: 'hidden',
-              height: `calc(100vh - ${heightValue}px`,
-            }}
-          >
-            {!user ? <AnonymousContent /> : <LoggedContent />}
-          </div>
-
-          {!user ? (
-            <div style={{ marginLeft: 10 }}>
-              <LanguageButton />
-            </div>
-          ) : null}
-        </Col>
+    <div className={`Navigation-section library ${!collapsed ? 'open' : ''} ${embedded ? 'library-embedded' : ''}`}>
+      {!embedded ? <LibraryTitle /> : null}
+      {!collapsed && user ? <>
+        <LibraryFilters />
+        <SearchArea />
+      </> : null}
+      <div className="library-list-container">
+        <div className="library-list">
+          {!user ? <AnonymousContent /> : <LoggedContent />}
+        </div>
       </div>
+      {!user ? <LanguageButton /> : null}
     </div>
   );
 };
@@ -78,13 +50,12 @@ const LoggedContent = memo(() => {
   const search = useAppSelector((state) => state.yourLibrary.search);
   const [t] = useTranslation(['navbar']);
 
+  const artistsStatus = useAppSelector((state) => state.yourLibrary.artistsStatus);
   const hasNoSearchResults = Boolean(search.trim()) && items.length === 0;
 
   return (
     <>
-      {!collapsed ? <SearchArea /> : null}
-
-      {hasNoSearchResults ? (
+      {!items.length && artistsStatus === 'loading' ? <div className="library-empty-state"><Spin /><p>Loading your library…</p></div> : !items.length && !search.trim() ? <p className="library-empty-state">Your library is empty. Save music or follow artists on Spotify, then reload.</p> : hasNoSearchResults ? (
         <div className='library-search-empty'>
           <h3>
             {t("Couldn't find")} “{search.trim()}”

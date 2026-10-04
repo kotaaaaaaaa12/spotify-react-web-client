@@ -7,7 +7,7 @@ import { memo, useMemo, type FC } from 'react';
 export const PlayCircleButton: FC<{ size?: number }> = memo(({ size = 30 }) => {
   const album = useAppSelector((state) => state.album.album);
 
-  const context = useAppSelector((state) => state.spotify.state?.context.uri);
+  const context = useAppSelector((state) => state.spotify.state?.context?.uri);
 
   const isCurrent = useMemo(() => album?.uri === context, [album, context]);
 

@@ -11,7 +11,7 @@ export const PlayCircleButton: FC<{ size?: number }> = memo(({ size = 30 }) => {
   const user = useAppSelector((state) => state.auth.user);
 
   const hasSongs = useAppSelector((state) => !!state.likedSongs.items.length);
-  const context = useAppSelector((state) => state.spotify.state?.context.uri);
+  const context = useAppSelector((state) => state.spotify.state?.context?.uri);
 
   const isCurrent = useMemo(
     () => context === `spotify:user:${user?.id}:collection`,

@@ -19,7 +19,7 @@ export const Artist: FC = () => {
           image={artist.images?.[0]?.url}
           imageTitle={t('About the artist')}
           extra={<FollowArtistButton id={artist.id} />}
-          subtitle={`${artist.followers?.total ?? 0} ${t('followers')}`}
+          subtitle={artist.followers?.total != null ? `${artist.followers.total.toLocaleString()} ${t('followers')}` : undefined}
         />
       </div>
     </ArtistActionsWrapper>

@@ -45,6 +45,7 @@ const SearchSelector = memo(({ open, onOpen, onClose }: { open: boolean; onOpen:
         <input
           ref={inputRef}
           value={search}
+          aria-label={t('Search in Your Library')}
           placeholder={t('Search in Your Library')}
           onChange={(e) => dispatch(yourLibraryActions.setSearch({ search: e.target.value }))}
           onKeyDown={(e) => {
@@ -54,7 +55,7 @@ const SearchSelector = memo(({ open, onOpen, onClose }: { open: boolean; onOpen:
         <button
           type='button'
           className='library-search__close'
-          aria-label='Close'
+          aria-label='Clear library search'
           onClick={handleClose}
         >
           <CloseIcon2 />
@@ -84,9 +85,9 @@ const ViewSelector = memo(({ hideLabel = false }: { hideLabel?: boolean }) => {
       menu={{ items, selectedKeys: [view] }}
       trigger={['click']}
     >
-      <button className={`order-button ${hideLabel ? 'order-button--icon-only' : ''}`}>
+      <button aria-label='Library view' className={`order-button ${hideLabel ? 'order-button--icon-only' : ''}`}>
         <Space align='center'>
-          {!hideLabel ? <span>{t(view)}</span> : null}
+          {!hideLabel ? <span className='library-view-label'>{t(view)}</span> : null}
           {view === 'GRID' ? <GridIcon style={{ height: '1rem' }} /> : null}
           {view === 'LIST' ? <OrderListIcon style={{ height: '1rem' }} /> : null}
           {view === 'COMPACT' ? <OrderCompactIcon style={{ height: '1rem' }} /> : null}
@@ -104,7 +105,7 @@ export const SearchArea = () => {
       align='center'
       justify='space-between'
       className='library-search-area'
-      style={{ margin: '0px 10px', marginBottom: 10 }}
+
     >
       <SearchSelector
         open={searchOpen}

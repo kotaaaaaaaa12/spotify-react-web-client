@@ -83,9 +83,9 @@ export const ArtistHeader: FC<{
             <span className='artistName'>
               <h1>{artist?.name}</h1>
             </span>
-            <span className='listeners'>
-              {artist?.followers?.total ?? 0} {t('followers')}
-            </span>
+            {artist?.followers?.total != null ? <span className='listeners'>
+              {artist.followers.total.toLocaleString()} {t('followers')}
+            </span> : null}
           </div>
         </div>
       </div>

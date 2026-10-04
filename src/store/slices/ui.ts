@@ -3,6 +3,7 @@ import { createSelector, createSlice, PayloadAction } from '@reduxjs/toolkit';
 import type { RootState } from '../store';
 
 export interface UiState {
+  lyricsExpanded: boolean;
   queueCollapsed: boolean;
   devicesCollapsed: boolean;
   detailsCollapsed: boolean;
@@ -13,6 +14,7 @@ export interface UiState {
 }
 
 const initialState: UiState = {
+  lyricsExpanded: false,
   queueCollapsed: true,
   devicesCollapsed: true,
   detailsCollapsed: true,
@@ -26,6 +28,10 @@ const uiSlice = createSlice({
   name: 'ui',
   initialState,
   reducers: {
+    setLyricsExpanded(state, action: PayloadAction<boolean>) { state.lyricsExpanded = action.payload; },
+    openLyrics(state) {
+      state.queueCollapsed = true; state.libraryCollapsed = true; state.devicesCollapsed = true; state.detailsCollapsed = false; state.lyricsExpanded = true;
+    },
     openLoginButton(state) {
       state.loginButtonOpen = true;
       state.loginModalItem = null;

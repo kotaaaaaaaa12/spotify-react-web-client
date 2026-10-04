@@ -19,9 +19,9 @@ export const LibraryDrawer = memo(() => {
 
   return (
     <ConfigProvider theme={{ algorithm: theme.darkAlgorithm }}>
-      <Drawer open={open} rootClassName="spotify-mobile-drawer" title="Your library" placement="left"
+      <Drawer open={open} rootClassName="spotify-mobile-drawer spotify-library-drawer" title="Your Library" placement="left"
         width="100%" zIndex={10010} autoFocus={false} onClose={() => dispatch(uiActions.collapseLibrary())}>
-        <YourLibrary />
+        <YourLibrary embedded />
       </Drawer>
     </ConfigProvider>
   );

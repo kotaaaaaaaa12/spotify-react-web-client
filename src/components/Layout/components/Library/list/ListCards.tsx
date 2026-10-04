@@ -194,7 +194,7 @@ const Card = memo((props: CardShortProps) => {
 
 export const ArtistCardShort = ({ artist }: { artist: Artist }) => {
   const navigate = useNavigate();
-  const contextUri = useAppSelector((state) => state.spotify.state?.context.uri);
+  const contextUri = useAppSelector((state) => state.spotify.state?.context?.uri);
 
   const onClick = () => {
     navigate(`/artist/${artist.id}`);
@@ -221,7 +221,7 @@ export const AlbumCardShort = memo(({ album }: { album: Album }) => {
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
   const userId = useAppSelector((state) => state.auth.user?.id);
-  const contextUri = useAppSelector((state) => state.spotify.state?.context.uri);
+  const contextUri = useAppSelector((state) => state.spotify.state?.context?.uri);
 
   const onClick = useCallback(() => {
     if (!userId) {
@@ -249,7 +249,7 @@ export const AlbumCardShort = memo(({ album }: { album: Album }) => {
 const PlaylistCardShort = memo(({ playlist }: { playlist: Playlist }) => {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
-  const contextUri = useAppSelector((state) => state.spotify.state?.context.uri);
+  const contextUri = useAppSelector((state) => state.spotify.state?.context?.uri);
 
   const onClick = () => {
     if (playlist.id === 'liked-songs') {

@@ -6,7 +6,7 @@ export interface Artist {
   };
 
   /** @description Information about the followers of the artist. */
-  followers: {
+  followers?: {
     /** @description This will always be set to null, as the Web API does not support it at the moment. */
     href: string;
 

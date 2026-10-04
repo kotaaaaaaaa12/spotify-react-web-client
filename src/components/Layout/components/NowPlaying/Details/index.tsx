@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
+import Lyrics from '../../../../Lyrics';
 import PlayControls from '../../PlayingBar/PlayControls';
 import { Artist } from './artist';
 import { NextInQueue } from './next';
@@ -132,6 +133,7 @@ export const Details = memo(() => {
           <div className='now-playing-primary'>
             <Container song={song} />
             <div className='now-playing-controls'><PlayControls /></div>
+            <Lyrics />
           </div>
           <div className='now-playing-secondary'><Artist /><NextInQueue /></div>
         </div>

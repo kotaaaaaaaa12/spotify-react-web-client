@@ -956,8 +956,10 @@
 }
 
 @media (max-width: 767px) {
-  .navbar { grid-template-columns: minmax(0, 1fr); padding: 12px; }
-  .navbar-navigation { display: none; }
+  .navbar { grid-template-columns: auto minmax(0, 1fr); gap: 8px; padding: 8px; }
+  .navbar-navigation { display: block; }
+  .navbar-history-buttons { display: none; }
+  .navbar-navigation .ant-space { gap: 0 !important; }
   .navbar-search > .ant-space > .ant-space-item:first-child { display: none; }
 }
 

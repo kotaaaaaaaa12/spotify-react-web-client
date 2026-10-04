@@ -8,7 +8,7 @@ export const PlayCircleButton: FC<{ size?: number }> = memo(({ size = 30 }) => {
     (state) => state.artist.artist,
     (prev, next) => prev?.id === next?.id
   );
-  const context = useAppSelector((state) => state.spotify.state?.context.uri);
+  const context = useAppSelector((state) => state.spotify.state?.context?.uri);
   const isCurrent = useMemo(() => artist?.uri === context, [artist, context]);
   return (
     <PlayCircle

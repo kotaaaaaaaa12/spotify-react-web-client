@@ -20,7 +20,6 @@ import { useTranslation } from 'react-i18next';
 
 // Redux
 import { uiActions } from '../../../../store/slices/ui';
-import { languageActions } from '../../../../store/slices/language';
 import { useAppDispatch, useAppSelector } from '../../../../store/store';
 
 const LyricsButton = () => {
@@ -31,7 +30,8 @@ const LyricsButton = () => {
     <Tooltip title={t('Lyrics')}>
       <button
         style={{ marginLeft: 5, marginRight: 5 }}
-        onClick={() => dispatch(languageActions.openLanguageModal())}
+        aria-label='Lyrics'
+        onClick={() => dispatch(uiActions.openLyrics())}
       >
         <MicrophoneIcon />
       </button>
