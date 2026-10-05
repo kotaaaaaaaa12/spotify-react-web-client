@@ -4,7 +4,7 @@ import { safePlaybackState } from '../../../container/playback-state.mjs';
 type AudioStage = 'worklet' | 'request' | 'response' | 'read' | 'decode';
 export interface AudioFailure { errorCode: string; stage: AudioStage; httpStatus?: number }
 export interface AudioTiming {
-  transport: 'pcm-v1'; revision: 'live-audio-2'; bufferMs: number; underruns: number; droppedFrames: number;
+  transport: 'pcm-v1'; revision: 'live-audio-3'; bufferMs: number; targetBufferMs: number; buffering: boolean; underruns: number; droppedFrames: number;
   connection: 'connecting' | 'connected' | 'reconnecting' | 'failed'; reconnects: number; receivedBytes: number;
   audioContextState: string; errorCode?: string; stage?: AudioStage; httpStatus?: number;
 }
@@ -21,7 +21,7 @@ export class LowLatencyAudio {
   private muted = false;
   private closed = false;
   private failed = false;
-  private timing: AudioTiming = { transport: 'pcm-v1', revision: 'live-audio-2', bufferMs: 0, underruns: 0,
+  private timing: AudioTiming = { transport: 'pcm-v1', revision: 'live-audio-3', bufferMs: 0, targetBufferMs: 400, buffering: true, underruns: 0,
     droppedFrames: 0, connection: 'connecting', reconnects: 0, receivedBytes: 0, audioContextState: 'suspended' };
   constructor(private onState: (state: Spotify.PlaybackState | null) => void, private onTiming: (timing: AudioTiming) => void,
     private onError: (failure: AudioFailure) => void) {}
@@ -40,13 +40,13 @@ export class LowLatencyAudio {
   }
   private async open(url: string) {
     this.publish();
-    await this.context.audioWorklet.addModule('/assets/cloud-audio-worklet.js?v=2');
+    await this.context.audioWorklet.addModule('/assets/cloud-audio-worklet.js?v=3');
     if (this.closed) return;
     const node = this.node = new AudioWorkletNode(this.context, 'spotify-cloud-audio', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
     node.onprocessorerror = () => this.fail(new LiveAudioError({ errorCode: 'audio_worklet_failed', stage: 'worklet' }));
     node.port.onmessage = ({ data }) => {
       if (this.closed || this.failed || this.muted) return;
-      this.onState(data.state); this.publish({ bufferMs: data.bufferMs, underruns: data.underruns, droppedFrames: data.droppedFrames });
+      this.onState(data.state); this.publish({ bufferMs: data.bufferMs, targetBufferMs: data.targetBufferMs, buffering: data.buffering, underruns: data.underruns, droppedFrames: data.droppedFrames });
     };
     node.connect(this.context.destination); this.reset();
     let failures = 0;

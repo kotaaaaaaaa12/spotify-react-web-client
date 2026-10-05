@@ -156,7 +156,7 @@ export class CloudBrowserPlayer {
     const length = source.length - source.length % 4; this.pcmRemainder = source.subarray(length);
     if (length && this.pcmClients.size && !this.playback?.paused) { this.liveAudioBytes += length; this.phase = 'streaming'; this.audio = 'received'; }
     for (const [client, info] of this.pcmClients) {
-      if (client.writableLength > 48000 * 4 * 0.6) { clearInterval(info.heartbeat); client.destroy(); this.pcmClients.delete(client); continue; }
+      if (client.writableLength > 48000 * 4 * 2.4) { clearInterval(info.heartbeat); client.destroy(); this.pcmClients.delete(client); continue; }
       const key = `${this.audioEpoch}:${this.playback?.track_window.current_track.uri}:${this.playback?.paused}`;
       if (Date.now() - info.sentAt >= (this.playback?.paused ? 1000 : 250) || info.key !== key) this.sendMetadata(client, info);
       if (this.playback?.paused) continue;
@@ -175,7 +175,7 @@ export class CloudBrowserPlayer {
     // Send state immediately, including before the first track produces sound.
     const heartbeat = () => {
       if (!this.pcmClients.has(response)) return;
-      if (response.destroyed || response.writableEnded || response.writableLength > 48000 * 4 * 0.6) {
+      if (response.destroyed || response.writableEnded || response.writableLength > 48000 * 4 * 2.4) {
         clearInterval(info.heartbeat); this.pcmClients.delete(response); response.destroy(); return;
       }
       if (Date.now() - info.sentAt >= 1000) this.sendMetadata(response, info);
