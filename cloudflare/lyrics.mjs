@@ -1,4 +1,4 @@
-const HEADERS = { 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store' };
+const HEADERS = { 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store', 'X-Lyrics-Revision': 'workers-transport-3' };
 const reply = (data, status = 200) => Response.json(data, { status, headers: HEADERS });
 const cleanText = value => typeof value === 'string' && value.length <= 100000 && value.trim() ? value : null;
 const normalize = value => value.normalize('NFKC').toLocaleLowerCase('en').replace(/[^\p{L}\p{N}]/gu, '');
@@ -40,12 +40,13 @@ export async function handleLyrics(request, context) {
   if (!Number.isFinite(duration) || duration < 1 || duration > 3600) return reply({ error: 'Invalid track duration.', code: 'invalid_track' }, 400);
   params.set('duration', String(Math.round(duration * 1000) / 1000));
   const details = { ...Object.fromEntries(params), duration };
-  const cacheKey = new Request(`${url.origin}/api/lyrics?${params}&lookup_version=2`);
+  const cacheKey = new Request(`${url.origin}/api/lyrics?${params}&lookup_version=3`);
   const cache = typeof caches !== 'undefined' ? caches.default : undefined;
   try { const cached = await cache?.match(cacheKey); if (cached) return cached; } catch { /* best effort */ }
   const deadline = Date.now() + 30000;
   const finished = new AbortController();
   let unavailable = false, searchCompleted = false;
+  const failures = [];
   async function lookup(path, query) {
     const remaining = deadline - Date.now();
     if (remaining <= 0) { unavailable = true; return undefined; }
@@ -53,10 +54,21 @@ export async function handleLyrics(request, context) {
       // Fixed provider URL; only public track metadata leaves this Worker.
       const response = await fetch(`https://lrclib.net/api/${path}?${query}`, {
         headers: { Accept: 'application/json', 'User-Agent': 'SpotifyWebClient/2.0.8 (lyrics display)' },
-        signal: AbortSignal.any([finished.signal, AbortSignal.timeout(Math.min(15000, remaining))]), redirect: 'error',
+        signal: AbortSignal.any([finished.signal, AbortSignal.timeout(Math.min(15000, remaining))]), redirect: 'manual',
       });
+      // Workerd rejects redirect: 'error' before making a network request.
+      // Never follow provider redirects or forward metadata to another host.
+      if (response.status >= 300 && response.status < 400) {
+        failures.push({ stage: path, reason: 'unexpected_redirect', httpStatus: response.status });
+        await response.body?.cancel();
+        throw new Error('upstream_unavailable');
+      }
       if (response.status === 404) return null;
-      if (!response.ok || !response.headers.get('Content-Type')?.includes('json')) throw new Error('upstream_unavailable');
+      if (!response.ok || !response.headers.get('Content-Type')?.includes('json')) {
+        failures.push({ stage: path, reason: response.ok ? 'invalid_response' : 'http_error', httpStatus: response.status });
+        await response.body?.cancel();
+        throw new Error('upstream_unavailable');
+      }
       const text = await response.text();
       if (text.length > 500000) throw new Error('invalid_response');
       const data = JSON.parse(text);
@@ -65,7 +77,15 @@ export async function handleLyrics(request, context) {
       } else if (!data || typeof data !== 'object' || Array.isArray(data)
         || !('plainLyrics' in data || 'syncedLyrics' in data || 'instrumental' in data)) throw new Error('invalid_response');
       return data;
-    } catch { unavailable = true; return undefined; }
+    } catch (error) {
+      if (finished.signal.aborted) return undefined;
+      unavailable = true;
+      if (!failures.some(failure => failure.stage === path)) {
+        // Fixed labels only; raw errors, URLs and provider bodies stay private.
+        failures.push({ stage: path, reason: ['TimeoutError', 'AbortError'].includes(error?.name) ? 'timeout' : 'request_failed' });
+      }
+      return undefined;
+    }
   }
   async function success(record) {
     finished.abort();
@@ -117,5 +137,6 @@ export async function handleLyrics(request, context) {
     if (!unavailable) { finished.abort(); return reply({ code: 'not_found', error: 'No lyrics were found for this recording.' }, 404); }
   } catch { /* Invalid provider responses are failures, never "no lyrics". */ }
   finished.abort();
-  return reply({ code: 'lyrics_unavailable', error: 'Could not connect to the lyrics service. Try again.' }, 503);
+  return reply({ code: 'lyrics_unavailable', error: 'Could not connect to the lyrics service. Try again.',
+    diagnostics: { revision: 'workers-transport-3', failures } }, 503);
 }
