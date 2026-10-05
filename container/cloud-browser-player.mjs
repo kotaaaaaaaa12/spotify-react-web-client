@@ -156,7 +156,7 @@ export class CloudBrowserPlayer {
     const length = source.length - source.length % 4; this.pcmRemainder = source.subarray(length);
     if (length && this.pcmClients.size && !this.playback?.paused) { this.liveAudioBytes += length; this.phase = 'streaming'; this.audio = 'received'; }
     for (const [client, info] of this.pcmClients) {
-      if (client.writableLength > 48000 * 4 * 0.6) { client.destroy(); this.pcmClients.delete(client); continue; }
+      if (client.writableLength > 48000 * 4 * 0.6) { clearInterval(info.heartbeat); client.destroy(); this.pcmClients.delete(client); continue; }
       const key = `${this.audioEpoch}:${this.playback?.track_window.current_track.uri}:${this.playback?.paused}`;
       if (Date.now() - info.sentAt >= (this.playback?.paused ? 1000 : 250) || info.key !== key) this.sendMetadata(client, info);
       if (this.playback?.paused) continue;
@@ -169,13 +169,26 @@ export class CloudBrowserPlayer {
   }
   attachPcm(response) {
     if (this.authentication !== 'accepted' || ['failed', 'stopped'].includes(this.phase) || this.clients.size + this.pcmClients.size >= 2) return false;
-    this.pcmClients.set(response, { sentAt: 0, key: '' }); response.once('close', () => this.pcmClients.delete(response)); return true;
+    const info = { sentAt: 0, key: '', heartbeat: null };
+    this.pcmClients.set(response, info);
+    // The HTTP handler flushes headers synchronously before this microtask.
+    // Send state immediately, including before the first track produces sound.
+    const heartbeat = () => {
+      if (!this.pcmClients.has(response)) return;
+      if (response.destroyed || response.writableEnded || response.writableLength > 48000 * 4 * 0.6) {
+        clearInterval(info.heartbeat); this.pcmClients.delete(response); response.destroy(); return;
+      }
+      if (Date.now() - info.sentAt >= 1000) this.sendMetadata(response, info);
+    };
+    queueMicrotask(heartbeat);
+    info.heartbeat = setInterval(heartbeat, 1000); info.heartbeat.unref?.();
+    response.once('close', () => { clearInterval(info.heartbeat); this.pcmClients.delete(response); }); return true;
   }
   attach(response) {
     if (this.authentication !== 'accepted' || ['failed', 'stopped'].includes(this.phase) || this.clients.size + this.pcmClients.size >= 2) return false;
     this.clients.add(response); response.once('close', () => this.clients.delete(response)); return true;
   }
-  closeClients() { for (const client of this.clients) client.end(); for (const client of this.pcmClients.keys()) client.end(); this.clients.clear(); this.pcmClients.clear(); this.pcmRemainder = null; }
+  closeClients() { for (const client of this.clients) client.end(); for (const [client, info] of this.pcmClients) { clearInterval(info.heartbeat); client.end(); } this.clients.clear(); this.pcmClients.clear(); this.pcmRemainder = null; }
   async stopInternal() {
     ++this.generation; this.phase = 'stopped'; this.playback = null; this.accessToken = null; this.tokenExpiresAt = 0;
     this.closeClients(); this.control?.close(); this.control = null;

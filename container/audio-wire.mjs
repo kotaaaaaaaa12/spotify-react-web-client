@@ -7,7 +7,8 @@ export function audioFrame(type, payload) {
 export class AudioFrameReader {
   pending = new Uint8Array();
   push(chunk, receive) {
-    if (chunk.byteLength + this.pending.byteLength > 1024 * 1024) throw new Error('Audio frame limit exceeded.');
+    // A browser read may coalesce many valid frames after a network stall.
+    // Limit each frame and the incomplete remainder, not the entire read.
     const data = new Uint8Array(this.pending.length + chunk.length);
     data.set(this.pending); data.set(chunk, this.pending.length);
     let offset = 0;

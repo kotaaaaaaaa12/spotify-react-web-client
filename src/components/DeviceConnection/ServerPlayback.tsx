@@ -38,6 +38,7 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
   const [running, setRunning] = useState(false); const [report, setReport] = useState<ServerReport>();
   const [error, setError] = useState<string>(); const [deviceId, setDeviceId] = useState<string>();
   const [streamUrl, setStreamUrl] = useState<string>(); const [copied, setCopied] = useState(false);
+  const [audioConnection, setAudioConnection] = useState<AudioTiming['connection']>();
   const audio = useRef<HTMLAudioElement>(null); const operation = useRef(false);
   const alive = useRef(true); const polling = useRef(false); const epoch = useRef(0);
   const playback = useRef<{ state: Spotify.PlaybackState; receivedAt: number } | null>(null);
@@ -48,7 +49,7 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
     dispatch(spotifyActions.setState({ state }));
   }, [dispatch]);
   const clearDevice = useCallback(() => {
-    playback.current = null; liveAudio.current?.dispose(); liveAudio.current = null; timing.current = null;
+    playback.current = null; liveAudio.current?.dispose(); liveAudio.current = null;
     playerService.setCloudSdkControls(false);
     setStreamUrl(undefined); setDeviceId(undefined); setServerAudio(null);
     playerService.setPlaybackDevice(null); playerService.setPlaybackDeviceName(null);
@@ -63,8 +64,17 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
     if (!enabled) { liveAudio.current?.dispose(); liveAudio.current = null; setServerAudio(null); return; }
     if (enabled && streamUrl && report?.audioTransport === 'pcm-v1' && supportsLiveAudio()) {
       if (!liveAudio.current) {
-        const player = liveAudio.current = new LowLatencyAudio(state => updatePlayback(state), value => { timing.current = value; }, () => {
-          if (alive.current) { clearDevice(); setRunning(false); playerService.setCloudPlaybackState('failed'); setError('The live audio connection stopped. Retry the server player.'); setOpen(true); }
+        const player = liveAudio.current = new LowLatencyAudio(state => updatePlayback(state), value => {
+          if (alive.current && liveAudio.current === player) { timing.current = value; setAudioConnection(value.connection); }
+        }, failure => {
+          if (alive.current && liveAudio.current === player) {
+            clearDevice(); setRunning(false); playerService.setCloudPlaybackState('failed');
+            const message = failure.stage === 'worklet' ? 'The browser could not load its audio processor. Reload the page after deployment.' :
+              failure.httpStatus === 401 || failure.httpStatus === 403 ? 'The audio request was denied. Check the account connection and site access rules.' :
+              failure.errorCode === 'audio_invalid_response' || failure.errorCode === 'audio_invalid_frame' ? 'The server returned an unexpected audio response. Copy the server report.' :
+              'The live audio connection could not recover. Retry the server player or copy the server report.';
+            setError(`${message} (${failure.errorCode}${failure.httpStatus ? `, HTTP ${failure.httpStatus}` : ''})`); setOpen(true);
+          }
         });
         player.connect('/api/server/pcm');
       }
@@ -146,7 +156,7 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
   const start = useCallback(async () => {
     if (operation.current) return; operation.current = true; ++epoch.current;
     playerService.setCloudPlaybackState('starting');
-    setBusy(true); setError(undefined); setCopied(false); clearDevice();
+    setBusy(true); setError(undefined); setCopied(false); clearDevice(); timing.current = null; setAudioConnection(undefined);
     try {
       const result = await serverRequest('start'); if (!alive.current) return; acceptReport(result);
     } catch (e) { if (alive.current) {
@@ -183,7 +193,7 @@ export default function ServerPlayback({ enabled, fallbackReason, onModeChange }
         {fallbackReason ? <p className="connection-note">Server playback was selected because this device could not connect to Spotify.</p> : null}
         {!paired ? <p className="connection-error">Use Log in with QR to connect your account first.</p> : null}
         {!enabled ? <button className="connection-button connection-button-wide" disabled={!paired} onClick={() => onModeChange(true)}>Use server playback</button> : <>
-          <p className="connection-status" role="status">{deviceId ? 'Ready. Close this dialog and choose a song.' : busy || running ? 'Starting the server player…' : 'Server player stopped'}</p>
+          <p className="connection-status" role="status">{audioConnection === 'reconnecting' && deviceId ? 'Reconnecting audio…' : deviceId ? 'Ready. Close this dialog and choose a song.' : busy || running ? 'Starting the server player…' : 'Server player stopped'}</p>
           <Space wrap style={{ marginBottom: 16 }}>
             <button className="connection-button" disabled={busy || !paired} onClick={() => void start()}>{running ? 'Reconnect' : 'Start server player'}</button>
             <button className="connection-button connection-button-secondary" disabled={!streamUrl || busy} onClick={() => {
