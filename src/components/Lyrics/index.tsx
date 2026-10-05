@@ -3,9 +3,8 @@ import { FiChevronDown, FiMic } from 'react-icons/fi';
 import { useAppDispatch, useAppSelector } from '../../store/store';
 import { uiActions } from '../../store/slices/ui';
 import { parseSyncedLyrics } from '../../utils/lyrics';
+import { fetchLyrics, type LyricsRecord } from '../../utils/lyricsRequest';
 import { playerService } from '../../services/player';
-
-interface LyricsRecord { source: string; instrumental: boolean; plainLyrics: string | null; syncedLyrics: string | null }
 
 export default function Lyrics() {
   const dispatch = useAppDispatch();
@@ -14,7 +13,7 @@ export default function Lyrics() {
   const duration = useAppSelector(state => state.spotify.state?.duration || 0);
   const position = useAppSelector(state => state.spotify.state?.position || 0);
   const canSeek = useAppSelector(state => !state.spotify.state?.disallows?.seeking);
-  const [record, setRecord] = useState<LyricsRecord>();
+  const [record, setRecord] = useState<LyricsRecord | null>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
   const [retry, setRetry] = useState(0);
@@ -23,18 +22,17 @@ export default function Lyrics() {
   const signature = useMemo(() => new URLSearchParams({ track_name: song?.name || '', artist_name: song?.artists[0]?.name || '',
     album_name: song?.album.name || '', duration: String(duration / 1000) }).toString(), [song?.name, song?.artists[0]?.name, song?.album.name, duration]);
   const [loadedSignature, setLoadedSignature] = useState('');
+  const ready = !!song?.name && !!song?.artists[0]?.name && duration >= 1000 && duration <= 3600000;
   useEffect(() => {
-    if (!open || !song) return;
+    if (!open || !ready) return;
     const controller = new AbortController();
     setLoading(true); setError(undefined); setRecord(undefined); setLoadedSignature(signature);
-    void fetch(`/api/lyrics?${signature}`, { signal: controller.signal }).then(async response => {
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Unable to load lyrics.');
+    void fetchLyrics(signature, controller.signal).then(data => {
       if (!controller.signal.aborted) setRecord(data);
-    }).catch(e => { if (!controller.signal.aborted) setError(e instanceof Error ? e.message : 'Unable to load lyrics.'); })
+    }).catch(e => { if (!controller.signal.aborted) setError(e instanceof Error ? e.message : 'Could not connect to the lyrics service. Try again.'); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [open, signature, retry, song?.id]);
+  }, [open, signature, retry, song?.id, ready]);
   const current = loadedSignature === signature ? record : undefined;
   const lines = useMemo(() => parseSyncedLyrics(current?.syncedLyrics || ''), [current?.syncedLyrics]);
   const active = lines.reduce((index, line, i) => line.time <= position ? i : index, -1);
@@ -49,7 +47,7 @@ export default function Lyrics() {
       <span><FiMic aria-hidden="true" /> Lyrics</span><FiChevronDown className={open ? 'expanded' : ''} aria-hidden="true" />
     </button>
     {open ? <div className="lyrics-body">
-      {loading || loadedSignature !== signature ? <p role="status">Loading lyrics…</p> : error ? <div><p role="status">{error}</p><button className="lyrics-retry" onClick={() => setRetry(value => value + 1)}>Retry</button></div> : current?.instrumental ? <p>This is an instrumental track.</p> : lines.length ?
+      {!ready ? <p role="status">Play a song to load its lyrics.</p> : loading || loadedSignature !== signature ? <p role="status">Loading lyrics…</p> : error ? <div><p role="status">{error}</p><button className="lyrics-retry" onClick={() => setRetry(value => value + 1)}>Retry</button></div> : current?.instrumental ? <p>This is an instrumental track.</p> : lines.length ?
         <div className="lyrics-lines" ref={viewport}>{lines.map((line, i) => <button key={i} ref={i === active ? activeLine : undefined}
           className={`lyric-line ${i === active ? 'active' : ''}`} disabled={!canSeek} aria-current={i === active ? 'true' : undefined}
           onClick={() => void playerService.seekToPosition(line.time).catch(() => {})}>{line.text || '♪'}</button>)}</div> : current?.plainLyrics ?
